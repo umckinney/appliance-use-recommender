@@ -3,9 +3,11 @@ from sqlalchemy.orm import DeclarativeBase
 
 from backend.config import settings
 
-# Fly.io Postgres connection strings use "postgres://" but SQLAlchemy async requires
-# "postgresql+asyncpg://". Rewrite on the fly so the secret doesn't need changing.
+# Fly.io uses "postgres://" but SQLAlchemy async requires "postgresql+asyncpg://".
+# Internal Fly network (.flycast) doesn't use SSL — disable it to avoid handshake errors.
 _db_url = settings.database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+if "ssl=" not in _db_url:
+    _db_url += ("&" if "?" in _db_url else "?") + "ssl=false"
 
 engine = create_async_engine(_db_url, echo=settings.env == "development")
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
