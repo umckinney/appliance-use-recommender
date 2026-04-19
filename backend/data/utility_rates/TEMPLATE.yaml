@@ -1,0 +1,40 @@
+# FlowShift Utility Rate Template
+# Copy this file, rename to <utility_id>.yaml, fill in the values, and open a PR.
+# See CONTRIBUTING.md for full instructions and validation requirements.
+
+utility_id: your_utility_id          # snake_case, e.g. "pacific_gas_electric"
+utility_name: Your Utility Name
+currency: USD                         # ISO 4217
+last_verified: YYYY-MM-DD            # date you confirmed rates against official source
+source_url: https://...              # direct link to official rate schedule page
+
+# Supported schedule types:
+#   - weekday/weekend split (most common)
+#   - single (flat rate — one block covering 0–24)
+#   - tou (time-of-use with named periods)
+schedules:
+  weekday:
+    - period: off_peak     # off_peak | mid_peak | peak
+      start_hour: 0        # inclusive, 0–23 (local time, 24h)
+      end_hour: 9          # exclusive
+    - period: peak
+      start_hour: 9
+      end_hour: 21
+    - period: off_peak
+      start_hour: 21
+      end_hour: 24
+
+  weekend:
+    - period: off_peak
+      start_hour: 0
+      end_hour: 24
+
+rates:
+  off_peak: 0.00    # USD/kWh — replace with actual value
+  mid_peak: 0.00    # omit if not used
+  peak: 0.00
+
+net_metering_credit: 0.00   # USD/kWh export credit; set to 0 if no net metering
+
+holidays:
+  - "01-01"  # MM-DD format; utility-specific holidays that map to weekend schedule
