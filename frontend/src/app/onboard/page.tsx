@@ -126,7 +126,7 @@ export default function OnboardPage() {
         )}
 
         {step === 4 && result && (
-          <StepDone apiKey={result.api_key} message={result.message} />
+          <StepDone apiKey={result.api_key} message={result.message} appliances={state.appliances} />
         )}
       </div>
     </main>

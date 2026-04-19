@@ -43,7 +43,7 @@ export default function StepLocation({ initial, onNext }: Props) {
           </label>
           <input
             type="text"
-            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="123 Main St, Seattle, WA 98101"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
@@ -56,7 +56,7 @@ export default function StepLocation({ initial, onNext }: Props) {
             Electric utility
           </label>
           <select
-            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             value={utility}
             onChange={(e) => setUtility(e.target.value)}
           >

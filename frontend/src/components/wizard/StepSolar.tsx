@@ -87,7 +87,7 @@ export default function StepSolar({ initial, onNext, onBack }: Props) {
                   min="0.1"
                   step="0.1"
                   placeholder="e.g. 7.2"
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={capacityKw}
                   onChange={(e) => setCapacityKw(e.target.value)}
                 />
@@ -101,7 +101,7 @@ export default function StepSolar({ initial, onNext, onBack }: Props) {
                   min="0"
                   max="90"
                   placeholder="20"
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={tiltDeg}
                   onChange={(e) => setTiltDeg(e.target.value)}
                 />
@@ -115,7 +115,7 @@ export default function StepSolar({ initial, onNext, onBack }: Props) {
                   min="0"
                   max="360"
                   placeholder="180 = south"
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={azimuthDeg}
                   onChange={(e) => setAzimuthDeg(e.target.value)}
                 />
@@ -134,7 +134,7 @@ export default function StepSolar({ initial, onNext, onBack }: Props) {
                   <input
                     type="text"
                     placeholder="1234567"
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={siteId}
                     onChange={(e) => setSiteId(e.target.value)}
                   />
@@ -146,7 +146,7 @@ export default function StepSolar({ initial, onNext, onBack }: Props) {
                   <input
                     type="password"
                     placeholder="from monitoring.solaredge.com"
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                   />

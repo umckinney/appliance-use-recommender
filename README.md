@@ -46,16 +46,16 @@ Visit `http://localhost:3000` to onboard and get your API key.
 
 ## Siri Setup (iOS 17+)
 
-1. Open the Shortcuts app
-2. Create a new shortcut → Add action → **Get contents of URL**
-3. Set URL to `http://<your-mac-ip>:8000/recommend/dishwasher?api_key=<your-key>`
-4. Add action → **Get Dictionary from Input** (auto-links to previous step)
-5. Add action → **Get Dictionary Value** → set Key to `text`
-6. Add action → **Speak Text** (auto-links to dictionary value)
-7. Rename the shortcut to your trigger phrase (e.g. "Should I run the dishwasher")
-8. Say "Hey Siri, should I run the dishwasher"
+1. Open the **Shortcuts** app
+2. Tap **+** → **Add Action** → search "URL" → tap **Get contents of URL**
+3. Paste your FlowShift URL: `http://<your-mac-ip>:8000/recommend/dishwasher?api_key=<your-key>`
+4. Tap **+** → **Add Action** → search "dictionary" → tap **Get Dictionary from Input**
+5. Tap **+** → **Add Action** → search "dictionary" → tap **Get Dictionary Value** → set Key to **text**
+6. Tap **+** → **Add Action** → search "speak" → tap **Speak Text**
+7. Tap the shortcut title at the top → rename to **Should I run the dishwasher?**
+8. Say "Hey Siri, should I run the dishwasher?"
 
-> Both devices must be on the same WiFi network. For always-available access, deploy to Fly.io and use your production URL instead.
+The onboarding screen generates the correct URL for each appliance and includes a copy button. Both devices must be on the same Wi-Fi network. For always-available access, deploy to Fly.io and use your production URL instead.
 
 ## Deployment
 
