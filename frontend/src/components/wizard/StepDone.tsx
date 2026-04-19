@@ -30,7 +30,16 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  function getApiBase(): string {
+    if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+    if (typeof window === "undefined") return "http://localhost:8000";
+    const host = window.location.hostname;
+    return host === "localhost" || host === "127.0.0.1"
+      ? "http://localhost:8000"
+      : `http://${host}:8000`;
+  }
+  const baseUrl = getApiBase();
+  const isLocalhost = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
   const siriUrl = `${baseUrl}/recommend/${selectedSlug}?api_key=${apiKey}`;
 
   async function copySiriUrl() {
@@ -108,6 +117,14 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
                 {copiedUrl ? "✓" : "Copy"}
               </button>
             </div>
+            {isLocalhost && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">
+                ⚠️ This URL won&apos;t work on your iPhone. Visit this page at{" "}
+                <strong>http://&lt;your-mac-ip&gt;:3000</strong> to get a usable URL.
+                Find your Mac&apos;s IP in{" "}
+                <strong>System Settings → Wi-Fi → Details</strong>.
+              </p>
+            )}
           </li>
           <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;dictionary&quot; → tap <strong>Get Dictionary from Input</strong></li>
           <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;dictionary&quot; → tap <strong>Get Dictionary Value</strong> → set Key to <strong>text</strong></li>

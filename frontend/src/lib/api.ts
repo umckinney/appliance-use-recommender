@@ -145,4 +145,10 @@ export const api = {
     request<RecommendResponse>(
       `/recommend/${slug}?api_key=${encodeURIComponent(apiKey)}`
     ),
+
+  accountLookup: (email: string) =>
+    request<{ api_key: string }>("/account/lookup", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
 };

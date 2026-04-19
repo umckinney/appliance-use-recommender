@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import create_tables
-from backend.routers import appliances, forecast, onboard, recommend, status
+from backend.routers import account, appliances, forecast, onboard, recommend, status
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.add_middleware(
 )
 
 app.include_router(onboard.router)
+app.include_router(account.router)
 app.include_router(recommend.router)
 app.include_router(status.router)
 app.include_router(forecast.router)

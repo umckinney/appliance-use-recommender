@@ -7,12 +7,14 @@ Carbon-aware appliance scheduling for your home. FlowShift recommends the best t
 - Real-time grid carbon intensity via BPA (Pacific Northwest)
 - EIA hourly fuel-type data for accurate 48-hour carbon forecasting
 - Utility TOU rate scheduling (Seattle City Light)
-- Solar generation integration (SolarEdge + Open-Meteo irradiance)
+- Solar generation integration (SolarEdge + pvlib clear-sky irradiance)
 - Multi-hour cycle scoring: optimizer averages cost and carbon across the full cycle span, not just the start hour
 - ENERGY STAR model lookup for dishwashers, washers, and dryers — auto-fills per-cycle kWh during onboarding
 - Weighted cost/carbon optimizer with natural-language recommendations
 - Siri/HomePod voice query support via Apple Shortcuts
 - Dashboard appliance management: add and delete appliances after onboarding
+- Account recovery: retrieve your API key by email on the onboarding page
+- 24h scheduling timeline: toggle appliances on the dashboard to see best run windows side by side, with overlap warnings
 
 ## Quick Start
 
@@ -65,6 +67,7 @@ The onboarding screen generates the correct URL for each appliance and includes 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/onboard` | Create account, returns `api_key` |
+| `POST` | `/account/lookup` | Retrieve `api_key` by email |
 | `GET` | `/appliances/presets` | List default appliance presets |
 | `GET` | `/appliances/search?category=&q=` | Search ENERGY STAR certified models (dishwasher / washer / dryer) |
 | `GET` | `/appliances` | List user's appliances (requires `api_key`) |
@@ -76,11 +79,23 @@ The onboarding screen generates the correct URL for each appliance and includes 
 
 ## Deployment
 
+### Backend (Fly.io)
+
 ```bash
+fly postgres create --name flowshift-db
+fly secrets set DATABASE_URL=<postgres-url> EIA_API_KEY=<key> SECRET_KEY=<secret>
 fly deploy
 ```
 
-See `fly.toml` for configuration.
+### Frontend (Vercel)
+
+Connect the repo at [vercel.com](https://vercel.com) and set:
+
+```
+NEXT_PUBLIC_API_URL=https://<your-fly-app>.fly.dev
+```
+
+Vercel auto-deploys on every push to `main`.
 
 ## License
 

@@ -40,13 +40,17 @@ function ModelSearch({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ModelSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [selected, setSelected] = useState<ModelSearchResult | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleChange(val: string) {
     setQuery(val);
+    setSelected(null);
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!val.trim()) {
       setResults([]);
+      setSearched(false);
       return;
     }
     timerRef.current = setTimeout(async () => {
@@ -58,6 +62,7 @@ function ModelSearch({
         setResults([]);
       } finally {
         setSearching(false);
+        setSearched(true);
       }
     }, 300);
   }
@@ -77,6 +82,12 @@ function ModelSearch({
       {searching && (
         <p className="text-xs text-gray-400 mt-1 animate-pulse">Searching ENERGY STAR…</p>
       )}
+      {searched && !searching && results.length === 0 && query.trim() && !selected && (
+        <p className="text-xs text-gray-400 mt-1">No ENERGY STAR results found — enter values manually.</p>
+      )}
+      {selected && (
+        <p className="text-xs text-green-600 mt-1">✓ {selected.brand} {selected.model} — values applied</p>
+      )}
       {results.length > 0 && (
         <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-48 overflow-y-auto">
           {results.map((r, i) => (
@@ -85,6 +96,7 @@ function ModelSearch({
                 type="button"
                 onClick={() => {
                   onSelect(r);
+                  setSelected(r);
                   setQuery(`${r.brand} ${r.model}`);
                   setResults([]);
                 }}

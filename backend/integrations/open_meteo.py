@@ -1,11 +1,11 @@
 """
-Open-Meteo integration — weather and solar irradiance forecast.
+Solar irradiance forecast via pvlib clear-sky model.
 
-Free, no API key, global coverage, coordinate-based (address-level precision).
-Used for: cloud cover, temperature, direct/diffuse solar irradiance.
-Cache: 30 minutes (per plan).
+Uses pvlib's Ineichen clear-sky model — no external API, no license restrictions.
+Trade-off: clear-sky doesn't account for cloud cover; estimates are optimistic on
+overcast days but accurate enough for scheduling decisions.
 
-Docs: https://open-meteo.com/en/docs
+Geocoding via Nominatim (OpenStreetMap) — free, open data (ODbL), no API key.
 """
 
 from __future__ import annotations
@@ -13,8 +13,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import httpx
+import pandas as pd
+import pvlib
 
-FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 CACHE_TTL_SECONDS = 1800  # 30 minutes
 
 _cache: dict[str, tuple[datetime, dict]] = {}
@@ -22,21 +23,22 @@ _cache: dict[str, tuple[datetime, dict]] = {}
 
 async def get_solar_forecast(lat: float, lon: float) -> dict:
     """
-    Return 24-hour solar irradiance and cloud cover forecast for a location.
+    Return 48-hour solar irradiance forecast using pvlib clear-sky model.
 
-    Returns:
+    Returns the same shape as the previous Open-Meteo implementation so callers
+    need no changes:
         {
             "hourly": [
                 {
-                    "time": "2026-03-29T10:00",
-                    "direct_radiation_w_m2": float,
-                    "diffuse_radiation_w_m2": float,
-                    "cloud_cover_pct": float,
-                    "temperature_c": float,
+                    "time": str (ISO8601),
+                    "direct_radiation_w_m2": float,   # DNI W/m²
+                    "diffuse_radiation_w_m2": float,  # DHI W/m²
+                    "cloud_cover_pct": float,          # always 0.0 (clear-sky)
+                    "temperature_c": float,            # always 15.0 (no weather data)
                 },
-                ...  # 24 entries
+                ...  # 48 entries
             ],
-            "source": "open-meteo",
+            "source": "pvlib-clearsky",
             "lat": float,
             "lon": float,
         }
@@ -49,40 +51,26 @@ async def get_solar_forecast(lat: float, lon: float) -> dict:
         if (now - cached_at).total_seconds() < CACHE_TTL_SECONDS:
             return data
 
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "hourly": "direct_radiation,diffuse_radiation,cloud_cover,temperature_2m",
-        "forecast_days": 2,
-        "timezone": "auto",
-    }
+    start = now.replace(minute=0, second=0, microsecond=0)
+    times = pd.date_range(start=start, periods=48, freq="h", tz="UTC")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(FORECAST_URL, params=params)
-        resp.raise_for_status()
-        raw = resp.json()
-
-    hourly = raw.get("hourly", {})
-    times = hourly.get("time", [])
-    direct = hourly.get("direct_radiation", [])
-    diffuse = hourly.get("diffuse_radiation", [])
-    cloud = hourly.get("cloud_cover", [])
-    temp = hourly.get("temperature_2m", [])
+    location = pvlib.location.Location(latitude=lat, longitude=lon, tz="UTC")
+    clearsky = location.get_clearsky(times)  # columns: ghi, dni, dhi
 
     hours = [
         {
-            "time": times[i],
-            "direct_radiation_w_m2": direct[i] if i < len(direct) else 0.0,
-            "diffuse_radiation_w_m2": diffuse[i] if i < len(diffuse) else 0.0,
-            "cloud_cover_pct": cloud[i] if i < len(cloud) else 100.0,
-            "temperature_c": temp[i] if i < len(temp) else 15.0,
+            "time": t.isoformat(),
+            "direct_radiation_w_m2": float(clearsky["dni"].iloc[i]),
+            "diffuse_radiation_w_m2": float(clearsky["dhi"].iloc[i]),
+            "cloud_cover_pct": 0.0,
+            "temperature_c": 15.0,
         }
-        for i in range(min(48, len(times)))  # 48 hours max
+        for i, t in enumerate(times)
     ]
 
     result = {
         "hourly": hours,
-        "source": "open-meteo",
+        "source": "pvlib-clearsky",
         "lat": lat,
         "lon": lon,
         "fetched_at": now.isoformat(),

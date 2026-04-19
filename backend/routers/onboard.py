@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
-from backend.integrations.open_meteo import geocode
+from backend.integrations.geocoding import geocode
 from backend.models import Appliance, User
 from backend.schemas import APPLIANCE_PRESETS, OnboardRequest, OnboardResponse
 
