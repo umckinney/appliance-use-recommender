@@ -3,7 +3,11 @@ from sqlalchemy.orm import DeclarativeBase
 
 from backend.config import settings
 
-engine = create_async_engine(settings.database_url, echo=settings.env == "development")
+# Fly.io Postgres connection strings use "postgres://" but SQLAlchemy async requires
+# "postgresql+asyncpg://". Rewrite on the fly so the secret doesn't need changing.
+_db_url = settings.database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+engine = create_async_engine(_db_url, echo=settings.env == "development")
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
