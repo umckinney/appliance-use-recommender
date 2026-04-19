@@ -8,7 +8,12 @@ from backend.config import settings
 _db_url = settings.database_url.replace("postgres://", "postgresql+asyncpg://", 1)
 _connect_args = {"ssl": False} if _db_url.startswith("postgresql") else {}
 
-engine = create_async_engine(_db_url, echo=settings.env == "development", connect_args=_connect_args)
+engine = create_async_engine(
+    _db_url,
+    echo=settings.env == "development",
+    connect_args=_connect_args,
+    pool_pre_ping=True,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
