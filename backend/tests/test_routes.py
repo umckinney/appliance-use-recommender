@@ -382,6 +382,10 @@ class TestForecast:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
+            patch(
+                "backend.routers.forecast.settings.eia_api_key",
+                new=None,
+            ),
         ):
             resp = await client.get(f"/forecast?api_key={api_key}")
         body = resp.json()

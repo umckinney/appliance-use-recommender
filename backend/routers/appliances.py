@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.integrations import energystar
 from backend.models import Appliance, User
-from backend.schemas import APPLIANCE_PRESETS, ApplianceIn, ApplianceOut
+from backend.schemas import APPLIANCE_PRESETS, ApplianceIn, ApplianceOut, ModelSearchResult
 
 router = APIRouter(prefix="/appliances", tags=["appliances"])
 
@@ -77,6 +78,21 @@ async def delete_appliance(
         raise HTTPException(status_code=404, detail=f"Appliance {slug!r} not found")
     await db.delete(appliance)
     await db.commit()
+
+
+@router.get("/search", response_model=list[ModelSearchResult])
+async def search_appliances(category: str, q: str = "", limit: int = 20):
+    """Search ENERGY STAR certified products. No auth required — public data.
+
+    category: one of dishwasher | washer | dryer
+    Returns: [{"brand", "model", "cycle_kwh", "cycle_minutes"}]
+    cycle_minutes is populated for dryers only; None for dishwashers/washers.
+    """
+    try:
+        results = await energystar.search_models(category, q, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return results
 
 
 @router.get("/presets", response_model=list[ApplianceOut])

@@ -68,6 +68,13 @@ class RecommendResponse(BaseModel):
     data_sources: list[str]
 
 
+class ModelSearchResult(BaseModel):
+    brand: str
+    model: str
+    cycle_kwh: float
+    cycle_minutes: int | None  # None = user must confirm (dishwasher/washer)
+
+
 class StatusResponse(BaseModel):
     grid_zone: str
     carbon_intensity_g_kwh: float

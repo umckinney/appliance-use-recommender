@@ -201,6 +201,63 @@ class TestScoreWindows:
         )
         assert len(windows) == 5
 
+    def test_multi_hour_span_averages_rate(self):
+        """3-hour cycle starting at hour 0 with rates [0.05, 0.20, 0.20] → avg 0.15, not 0.05."""
+        schedule = [
+            {"hour_local": f"2026-01-01T{i:02d}:00:00", "rate_usd_kwh": r}
+            for i, r in enumerate([0.05, 0.20, 0.20])
+        ]
+        windows = score_windows(
+            rate_schedule=schedule,
+            carbon_forecast=_make_carbon(3),
+            solar_forecast=[0.0] * 3,
+            appliance_kwh=1.0,
+            net_metering_credit_rate=0.0,
+            optimization_weight=0.0,
+            cycle_minutes=180,
+        )
+        # Hour 0 window spans hours 0-2: avg rate = (0.05+0.20+0.20)/3 = 0.15
+        hour0_window = next(w for w in windows if "T00:" in w.hour_local)
+        assert hour0_window.rate_usd_kwh == pytest.approx(0.15, rel=1e-4)
+
+    def test_single_hour_cycle_unchanged(self):
+        """cycle_minutes=60 should behave identically to the default (no span averaging)."""
+        schedule = _make_schedule(4, rate=0.10)
+        schedule[2]["rate_usd_kwh"] = 0.05
+
+        default_windows = score_windows(
+            rate_schedule=schedule,
+            carbon_forecast=_make_carbon(4),
+            solar_forecast=[0.0] * 4,
+            appliance_kwh=1.0,
+            net_metering_credit_rate=0.0,
+            optimization_weight=0.0,
+        )
+        explicit_windows = score_windows(
+            rate_schedule=schedule,
+            carbon_forecast=_make_carbon(4),
+            solar_forecast=[0.0] * 4,
+            appliance_kwh=1.0,
+            net_metering_credit_rate=0.0,
+            optimization_weight=0.0,
+            cycle_minutes=60,
+        )
+        assert [w.hour_local for w in default_windows] == [w.hour_local for w in explicit_windows]
+
+    def test_span_clips_at_schedule_end(self):
+        """Cycle starting at the last available hour should not crash; clips to available hours."""
+        schedule = _make_schedule(3)
+        windows = score_windows(
+            rate_schedule=schedule,
+            carbon_forecast=_make_carbon(3),
+            solar_forecast=[0.0] * 3,
+            appliance_kwh=1.0,
+            net_metering_credit_rate=0.0,
+            optimization_weight=0.5,
+            cycle_minutes=180,  # 3-hour span, last hour has only 1 available
+        )
+        assert len(windows) == 3  # should not crash or skip any windows
+
 
 class TestCarbonLabel:
     @pytest.mark.parametrize(

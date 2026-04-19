@@ -107,6 +107,7 @@ async def recommend(
         appliance_kwh=appliance.cycle_kwh,
         net_metering_credit_rate=nm_credit if user.net_metering else 0.0,
         optimization_weight=user.optimization_weight,
+        cycle_minutes=appliance.cycle_minutes,
     )
 
     def to_schema(w: optimizer.Window) -> RecommendWindow:

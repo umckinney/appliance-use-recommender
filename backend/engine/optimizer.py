@@ -11,8 +11,10 @@ Returns the ranked list of windows (lowest score = best).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
+from statistics import mean
 
 
 @dataclass
@@ -34,36 +36,43 @@ def score_windows(
     appliance_kwh: float,
     net_metering_credit_rate: float,  # USD/kWh exported
     optimization_weight: float,  # 0=minimize cost, 1=minimize carbon
+    cycle_minutes: int = 60,  # actual cycle duration — averages cost/carbon across span
     base_load_kw: float = 0.5,  # assumed background load for net metering calc
 ) -> list[Window]:
     """
     Score each hour in the schedule and return sorted windows (best first).
+
+    For multi-hour cycles, cost and carbon are averaged across the full span so that
+    a 2.5-hour cycle straddling peak/off-peak is scored correctly.
     """
     n = min(len(rate_schedule), len(carbon_forecast), len(solar_forecast))
     windows: list[Window] = []
+    span = max(1, math.ceil(cycle_minutes / 60))
 
     for i in range(n):
-        rate = rate_schedule[i]["rate_usd_kwh"]
-        carbon = carbon_forecast[i]["carbon_g_kwh"] if i < len(carbon_forecast) else 200.0
-        solar = solar_forecast[i] if i < len(solar_forecast) else 0.0
+        hours = range(i, min(i + span, n))
+
+        avg_rate = mean(rate_schedule[j]["rate_usd_kwh"] for j in hours)
+        avg_carbon = mean(carbon_forecast[j]["carbon_g_kwh"] for j in hours)
+        avg_solar = mean(solar_forecast[j] for j in hours)
 
         # Net metering: if solar > background load, surplus offsets appliance cost
-        surplus_kw = max(0.0, solar - base_load_kw)
+        surplus_kw = max(0.0, avg_solar - base_load_kw)
         # Fraction of appliance cycle covered by solar export credit
         credit_kwh = min(appliance_kwh, surplus_kw)
-        net_cost = (appliance_kwh * rate) - (credit_kwh * net_metering_credit_rate)
+        net_cost = (appliance_kwh * avg_rate) - (credit_kwh * net_metering_credit_rate)
         net_cost = max(0.0, net_cost)
 
         grid_kwh = max(0.0, appliance_kwh - surplus_kw)
-        carbon_kg = grid_kwh * carbon / 1000.0
+        carbon_kg = grid_kwh * avg_carbon / 1000.0
 
         windows.append(
             Window(
                 hour_utc=rate_schedule[i].get("hour_utc", rate_schedule[i]["hour_local"]),
                 hour_local=rate_schedule[i]["hour_local"],
-                rate_usd_kwh=rate,
-                carbon_g_kwh=carbon,
-                solar_kw=solar,
+                rate_usd_kwh=round(avg_rate, 6),
+                carbon_g_kwh=round(avg_carbon, 4),
+                solar_kw=round(avg_solar, 4),
                 net_cost_usd=round(net_cost, 4),
                 carbon_kg=round(carbon_kg, 4),
                 score=0.0,  # filled below

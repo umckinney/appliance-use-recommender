@@ -13,6 +13,15 @@ export type AppliancePreset = {
   cycle_minutes: number;
 };
 
+export type ApplianceOut = AppliancePreset & { notes?: string };
+
+export type ModelSearchResult = {
+  brand: string;
+  model: string;
+  cycle_kwh: number;
+  cycle_minutes: number | null;
+};
+
 export type OnboardPayload = {
   name?: string;
   email?: string;
@@ -102,6 +111,29 @@ export const api = {
     }),
 
   presets: () => request<AppliancePreset[]>("/appliances/presets"),
+
+  listAppliances: (apiKey: string) =>
+    request<ApplianceOut[]>(`/appliances?api_key=${encodeURIComponent(apiKey)}`),
+
+  addAppliance: (
+    apiKey: string,
+    a: Omit<ApplianceOut, "id">
+  ) =>
+    request<ApplianceOut>(`/appliances?api_key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      body: JSON.stringify(a),
+    }),
+
+  deleteAppliance: (apiKey: string, slug: string) =>
+    request<void>(
+      `/appliances/${encodeURIComponent(slug)}?api_key=${encodeURIComponent(apiKey)}`,
+      { method: "DELETE" }
+    ),
+
+  searchModels: (category: string, q: string) =>
+    request<ModelSearchResult[]>(
+      `/appliances/search?category=${encodeURIComponent(category)}&q=${encodeURIComponent(q)}`
+    ),
 
   status: (apiKey: string) =>
     request<StatusResponse>(`/status?api_key=${encodeURIComponent(apiKey)}`),

@@ -8,8 +8,11 @@ Carbon-aware appliance scheduling for your home. FlowShift recommends the best t
 - EIA hourly fuel-type data for accurate 48-hour carbon forecasting
 - Utility TOU rate scheduling (Seattle City Light)
 - Solar generation integration (SolarEdge + Open-Meteo irradiance)
+- Multi-hour cycle scoring: optimizer averages cost and carbon across the full cycle span, not just the start hour
+- ENERGY STAR model lookup for dishwashers, washers, and dryers — auto-fills per-cycle kWh during onboarding
 - Weighted cost/carbon optimizer with natural-language recommendations
 - Siri/HomePod voice query support via Apple Shortcuts
+- Dashboard appliance management: add and delete appliances after onboarding
 
 ## Quick Start
 
@@ -56,6 +59,20 @@ Visit `http://localhost:3000` to onboard and get your API key.
 8. Say "Hey Siri, should I run the dishwasher?"
 
 The onboarding screen generates the correct URL for each appliance and includes a copy button. Both devices must be on the same Wi-Fi network. For always-available access, deploy to Fly.io and use your production URL instead.
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/onboard` | Create account, returns `api_key` |
+| `GET` | `/appliances/presets` | List default appliance presets |
+| `GET` | `/appliances/search?category=&q=` | Search ENERGY STAR certified models (dishwasher / washer / dryer) |
+| `GET` | `/appliances` | List user's appliances (requires `api_key`) |
+| `POST` | `/appliances` | Add an appliance (requires `api_key`) |
+| `DELETE` | `/appliances/{slug}` | Delete an appliance (requires `api_key`) |
+| `GET` | `/status` | Current carbon intensity + rate (requires `api_key`) |
+| `GET` | `/forecast` | 48-hour carbon + rate forecast (requires `api_key`) |
+| `GET` | `/recommend/{slug}` | Best run windows for a specific appliance (requires `api_key`) |
 
 ## Deployment
 
