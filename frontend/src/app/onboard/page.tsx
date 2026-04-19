@@ -8,6 +8,7 @@ import StepLocation from "@/components/wizard/StepLocation";
 import StepSolar from "@/components/wizard/StepSolar";
 import StepAppliances from "@/components/wizard/StepAppliances";
 import StepPreferences from "@/components/wizard/StepPreferences";
+import Spinner from "@/components/Spinner";
 import StepDone from "@/components/wizard/StepDone";
 
 function RecoveryPanel() {
@@ -201,9 +202,10 @@ export default function OnboardPage() {
               onBack={() => setStep(2)}
             />
             {submitting && (
-              <p className="text-center text-sm text-gray-500 mt-4">
+              <div className="flex items-center justify-center gap-2 mt-4 text-sm text-gray-500">
+                <Spinner size="sm" />
                 Creating your account…
-              </p>
+              </div>
             )}
             {error && (
               <p className="text-center text-sm text-red-500 mt-4">{error}</p>

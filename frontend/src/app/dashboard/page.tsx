@@ -13,6 +13,7 @@ import {
   StatusResponse,
 } from "@/lib/api";
 import Card from "@/components/Card";
+import Spinner from "@/components/Spinner";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -222,7 +223,7 @@ function ScheduleSection({
             >
               <span>{SLUG_ICON[a.slug] ?? "🔌"}</span>
               <span>{a.name}</span>
-              {spinning && <span className="animate-spin text-xs">⟳</span>}
+              {spinning && <Spinner size="sm" />}
             </button>
           );
         })}
@@ -675,7 +676,12 @@ function DashboardContent() {
   }
 
   if (loading) {
-    return <div className="text-center py-20 text-gray-400 text-sm animate-pulse">Loading your grid snapshot…</div>;
+    return (
+      <div className="flex items-center justify-center gap-2 py-20 text-gray-400 text-sm">
+        <Spinner size="md" />
+        Loading your grid snapshot…
+      </div>
+    );
   }
 
   if (error) {

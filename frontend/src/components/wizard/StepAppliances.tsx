@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, AppliancePreset, ModelSearchResult } from "@/lib/api";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
+import Spinner from "@/components/Spinner";
 
 type SelectedAppliance = Pick<
   AppliancePreset,
@@ -56,7 +57,12 @@ function ModelSearch({
     timerRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await api.searchModels(category, val);
+        let res = await api.searchModels(category, val);
+        // If no results and query looks like "Brand ModelNumber", retry with just the model number
+        if (res.length === 0 && val.trim().includes(" ")) {
+          const lastWord = val.trim().split(/\s+/).pop() ?? val;
+          res = await api.searchModels(category, lastWord);
+        }
         setResults(res.slice(0, 8));
       } catch {
         setResults([]);
@@ -202,7 +208,10 @@ export default function StepAppliances({ initial, onNext, onBack }: Props) {
       </p>
 
       {loading ? (
-        <div className="text-sm text-gray-400 py-8 text-center">Loading appliances…</div>
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-400">
+          <Spinner size="sm" />
+          Loading appliances…
+        </div>
       ) : (
         <div className="space-y-2 mb-6">
           {presets.map((p) => {
