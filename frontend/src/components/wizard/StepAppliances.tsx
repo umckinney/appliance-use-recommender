@@ -58,14 +58,11 @@ function ModelSearch({
       setSearching(true);
       try {
         let res = await api.searchModels(category, val);
-        // If no results and query has spaces (e.g. "LG DLEX3900B"), retry with just the model token
+        // If no results and query has spaces (e.g. "LG DLEX3900B"), retry with
+        // just the model token — backend handles wildcard prefix matching (DLEX3900*)
         if (res.length === 0 && val.trim().includes(" ")) {
           const lastWord = val.trim().split(/\s+/).pop() ?? val;
           res = await api.searchModels(category, lastWord);
-          // If still nothing, try dropping the last character (handles "DLEX3900B" → "DLEX3900*")
-          if (res.length === 0 && lastWord.length > 4) {
-            res = await api.searchModels(category, lastWord.slice(0, -1));
-          }
         }
         setResults(res.slice(0, 8));
       } catch {

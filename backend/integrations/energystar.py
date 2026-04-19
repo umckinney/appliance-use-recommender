@@ -44,12 +44,30 @@ async def search_models(category: str, query: str, limit: int = 20) -> list[dict
         return cached[1]
 
     dataset_id, annual_cycles = DATASETS[category]
-    try:
-        rows = await _fetch_raw(dataset_id, query, limit)
-    except Exception:
-        return []
 
-    results = _normalize(category, rows, annual_cycles)
+    # Socrata full-text search ($q) matches exact tokens, so "DLEX3900B" won't
+    # find a record stored as "DLEX3900*". We progressively strip the rightmost
+    # character from the model token until Socrata returns rows, then post-filter
+    # so that wildcard records (e.g. "DLEX3900*") only appear when the user's
+    # original query starts with the prefix before the "*".
+    words = query.split()
+    last_word = words[-1]
+    rows: list[dict] = []
+    search_query = query
+
+    for _ in range(6):
+        try:
+            rows = await _fetch_raw(dataset_id, search_query, limit)
+        except Exception:
+            rows = []
+        if rows:
+            break
+        if len(last_word) <= 3:
+            break
+        last_word = last_word[:-1]
+        search_query = " ".join(words[:-1] + [last_word]) if len(words) > 1 else last_word
+
+    results = _normalize(category, rows, annual_cycles, original_query=query)
     _CACHE[cache_key] = (time.time(), results)
     return results
 
@@ -65,7 +83,7 @@ async def _fetch_raw(dataset_id: str, query: str, limit: int) -> list[dict]:
         return resp.json()
 
 
-def _normalize(category: str, rows: list[dict], annual_cycles: int) -> list[dict]:
+def _normalize(category: str, rows: list[dict], annual_cycles: int, original_query: str = "") -> list[dict]:
     results = []
     for row in rows:
         try:
@@ -93,6 +111,16 @@ def _normalize(category: str, rows: list[dict], annual_cycles: int) -> list[dict
             model = (row.get("model_number") or row.get("model_name") or "").strip()
             if not brand and not model:
                 continue
+
+            # Wildcard prefix matching: ENERGY STAR stores some models as e.g.
+            # "DLEX3900*" meaning the cert covers all variants. Treat "*" as a
+            # prefix wildcard — only include the result if the user's model token
+            # starts with the prefix before "*".
+            if "*" in model and original_query:
+                model_prefix = model.split("*")[0].upper()
+                query_model_token = original_query.split()[-1].upper()
+                if not query_model_token.startswith(model_prefix):
+                    continue
 
             results.append(
                 {
