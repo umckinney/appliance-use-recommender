@@ -11,7 +11,11 @@ from backend.routers import account, appliances, forecast, onboard, recommend, s
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await create_tables()
+    import logging
+    try:
+        await create_tables()
+    except Exception as exc:
+        logging.getLogger(__name__).error("DB startup error (will retry on first request): %s", exc)
     yield
 
 
