@@ -27,5 +27,7 @@ async def get_db() -> AsyncSession:
 
 
 async def create_tables() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # SQLite only — Postgres deployments must run `alembic upgrade head` instead.
+    if _db_url.startswith("sqlite"):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
