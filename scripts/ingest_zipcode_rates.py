@@ -49,14 +49,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 # OpenEI residential rate CSVs (2022 edition — update URL for newer editions)
-OPENEI_IOU_URL = (
-    "https://openei.org/doe-opendata/dataset/u-s-electric-utility-companies-and-rates/"
-    "resource/02512285-7f5e-4a07-8a63-bde470edde5b/download/iouzipcodes2022.csv"
-)
-OPENEI_NONIOU_URL = (
-    "https://openei.org/doe-opendata/dataset/u-s-electric-utility-companies-and-rates/"
-    "resource/e3b7ece8-5e39-41ef-a40a-77879f6e59f9/download/non_iouzipcodes2022.csv"
-)
+OPENEI_IOU_URL = "https://data.openei.org/files/6225/iou_zipcodes_2023.csv"
+OPENEI_NONIOU_URL = "https://data.openei.org/files/6225/non_iou_zipcodes_2023.csv"
 
 SOURCE_YEAR = 2022
 
