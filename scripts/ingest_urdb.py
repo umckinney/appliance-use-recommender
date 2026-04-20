@@ -164,7 +164,13 @@ async def _upsert_batch(session, batch: list[dict]) -> tuple[int, int, int]:
 
 async def ingest(force: bool = False) -> None:
     database_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./flowshift.db")
-    engine = create_async_engine(database_url)
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    connect_args = {"ssl": False} if database_url.startswith("postgresql") else {}
+    engine = create_async_engine(database_url, connect_args=connect_args)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     started_at = datetime.now(UTC).replace(tzinfo=None)

@@ -328,8 +328,13 @@ async def main(force: bool = False) -> None:
     import os
 
     db_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./flowshift.db")
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    engine = create_async_engine(db_url, poolclass=NullPool)
+    connect_args = {"ssl": False} if db_url.startswith("postgresql") else {}
+    engine = create_async_engine(db_url, poolclass=NullPool, connect_args=connect_args)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
