@@ -4,6 +4,9 @@ primary_region = "sjc"  # San Jose — closest available to Pacific Northwest
 [build]
   dockerfile = "Dockerfile"
 
+[deploy]
+  release_command = "alembic upgrade head"
+
 [env]
   ENV = "production"
   PORT = "8080"
