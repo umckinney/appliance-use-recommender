@@ -2,10 +2,9 @@
 
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 
-from backend.integrations.energystar import _normalize, search_models
+from backend.integrations.energystar import _normalize, get_all_models, search_models
 
 
 class TestNormalize:
@@ -58,6 +57,18 @@ class TestNormalize:
         results = _normalize("dishwasher", rows, annual_cycles=215)
         assert len(results) == 0
 
+    def test_normalize_mid_string_wildcard(self):
+        """WM3900H*A should be stored with prefix WM3900H* so it matches WM3900HBA."""
+        rows = [
+            {
+                "brand_name": "LG",
+                "model_number": "WM3900H*A",
+                "annual_energy_use_kwh_year": "100",
+            }
+        ]
+        results = _normalize("washer", rows, annual_cycles=392)
+        assert results[0]["model"] == "WM3900H*"
+
 
 class TestSearchModels:
     @pytest.mark.asyncio
@@ -67,34 +78,76 @@ class TestSearchModels:
 
     @pytest.mark.asyncio
     async def test_search_returns_empty_on_http_error(self):
-        with patch(
-            "backend.integrations.energystar._fetch_raw",
-            new_callable=AsyncMock,
-            side_effect=httpx.HTTPError("timeout"),
+        from backend.integrations import energystar as es
+        es._FULL_CACHE.clear()
+
+        with (
+            patch(
+                "backend.integrations.energystar._fetch_rows_updated_at",
+                new_callable=AsyncMock,
+                side_effect=Exception("timeout"),
+            ),
+            patch(
+                "backend.integrations.energystar._fetch_all_raw",
+                new_callable=AsyncMock,
+                side_effect=Exception("timeout"),
+            ),
         ):
             results = await search_models("dishwasher", "bosch")
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_cache_prevents_second_call(self):
+    async def test_cache_prevents_second_fetch(self):
+        """Calling get_all_models twice for the same category should only fetch once."""
         mock_rows = [
             {
                 "brand_name": "Bosch",
                 "model_number": "SMS68",
-                "estimated_annual_energy_use_kwh": "240",
+                "annual_energy_use_kwh_year": "240",
             }
         ]
-        # Clear any stale cache entry first
         from backend.integrations import energystar as es
+        es._FULL_CACHE.clear()
 
-        es._CACHE.clear()
-
-        with patch(
-            "backend.integrations.energystar._fetch_raw",
-            new_callable=AsyncMock,
-            return_value=mock_rows,
-        ) as mock_fetch:
-            await search_models("dishwasher", "bosch_cache_test", limit=5)
-            await search_models("dishwasher", "bosch_cache_test", limit=5)
+        with (
+            patch(
+                "backend.integrations.energystar._fetch_rows_updated_at",
+                new_callable=AsyncMock,
+                return_value="12345",
+            ),
+            patch(
+                "backend.integrations.energystar._fetch_all_raw",
+                new_callable=AsyncMock,
+                return_value=mock_rows,
+            ) as mock_fetch,
+        ):
+            await get_all_models("dishwasher")
+            await get_all_models("dishwasher")
 
         mock_fetch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_search_filters_by_query(self):
+        mock_rows = [
+            {"brand_name": "Bosch", "model_number": "SMS68", "annual_energy_use_kwh_year": "240"},
+            {"brand_name": "LG", "model_number": "LDP6809", "annual_energy_use_kwh_year": "220"},
+        ]
+        from backend.integrations import energystar as es
+        es._FULL_CACHE.clear()
+
+        with (
+            patch(
+                "backend.integrations.energystar._fetch_rows_updated_at",
+                new_callable=AsyncMock,
+                return_value="12345",
+            ),
+            patch(
+                "backend.integrations.energystar._fetch_all_raw",
+                new_callable=AsyncMock,
+                return_value=mock_rows,
+            ),
+        ):
+            results = await search_models("dishwasher", "bosch")
+
+        assert len(results) == 1
+        assert results[0]["brand"] == "Bosch"

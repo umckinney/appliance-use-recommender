@@ -4,15 +4,12 @@ Solar irradiance forecast via pvlib clear-sky model.
 Uses pvlib's Ineichen clear-sky model — no external API, no license restrictions.
 Trade-off: clear-sky doesn't account for cloud cover; estimates are optimistic on
 overcast days but accurate enough for scheduling decisions.
-
-Geocoding via Nominatim (OpenStreetMap) — free, open data (ODbL), no API key.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import httpx
 import pandas as pd
 import pvlib
 
@@ -25,8 +22,7 @@ async def get_solar_forecast(lat: float, lon: float) -> dict:
     """
     Return 48-hour solar irradiance forecast using pvlib clear-sky model.
 
-    Returns the same shape as the previous Open-Meteo implementation so callers
-    need no changes:
+    Returns:
         {
             "hourly": [
                 {
@@ -77,28 +73,3 @@ async def get_solar_forecast(lat: float, lon: float) -> dict:
     }
     _cache[cache_key] = (now, result)
     return result
-
-
-async def geocode(address: str) -> dict | None:
-    """
-    Geocode a street address to lat/lon using Nominatim (OpenStreetMap).
-    Returns {"lat": float, "lon": float, "display_name": str} or None.
-    """
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": address, "format": "json", "limit": 1}
-    headers = {"User-Agent": "FlowShift/0.1 (contact@flowshift.app)"}
-
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(url, params=params, headers=headers)
-        resp.raise_for_status()
-        results = resp.json()
-
-    if not results:
-        return None
-
-    r = results[0]
-    return {
-        "lat": float(r["lat"]),
-        "lon": float(r["lon"]),
-        "display_name": r.get("display_name", address),
-    }

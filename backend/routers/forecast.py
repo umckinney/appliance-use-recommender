@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.database import get_db
 from backend.engine import rates, solar
-from backend.integrations import bpa, eia, open_meteo, solaredge
+from backend.integrations import bpa, eia, solar as solar_integration, solaredge
 from backend.models import User
 from backend.schemas import ForecastHour, ForecastResponse
 
@@ -34,7 +34,7 @@ async def forecast(api_key: str, db: AsyncSession = Depends(get_db)):
 
     # Fetch live data
     grid_data = await bpa.get_carbon_intensity()
-    weather = await open_meteo.get_solar_forecast(user.lat, user.lon)
+    weather = await solar_integration.get_solar_forecast(user.lat, user.lon)
     bpa_carbon_g_kwh = grid_data["carbon_g_kwh"]
 
     solar_now = None

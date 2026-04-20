@@ -40,6 +40,7 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
   }
   const baseUrl = getApiBase();
   const isLocalhost = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+  const isCloud = !!process.env.NEXT_PUBLIC_API_URL && !isLocalhost;
   const siriUrl = `${baseUrl}/recommend/${selectedSlug}?api_key=${apiKey}`;
 
   async function copySiriUrl() {
@@ -133,10 +134,12 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
           <li>Say &quot;Hey Siri, should I run the {selectedName}?&quot;</li>
         </ol>
 
-        <p className="text-xs text-blue-600">
-          This URL only works on the same Wi-Fi network as this computer. For always-available
-          access, deploy to Fly.io and update the URL to your production address.
-        </p>
+        {!isCloud && (
+          <p className="text-xs text-blue-600">
+            For always-available access, deploy to Fly.io and update the URL to your
+            production address.
+          </p>
+        )}
       </div>
 
       <div className="flex gap-3">

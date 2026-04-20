@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.database import get_db
 from backend.engine import optimizer, rates, solar
-from backend.integrations import bpa, eia, open_meteo, solaredge
+from backend.integrations import bpa, eia, solar as solar_integration, solaredge
 from backend.models import Appliance, User
 from backend.schemas import RecommendResponse, RecommendWindow
 
@@ -47,7 +47,7 @@ async def recommend(
 
     # Fetch live data
     grid_data = await bpa.get_carbon_intensity()
-    weather = await open_meteo.get_solar_forecast(user.lat, user.lon)
+    weather = await solar_integration.get_solar_forecast(user.lat, user.lon)
     solar_now = None
     if user.has_solar and (user.solaredge_site_id or user.solar_capacity_kw):
         solar_now = await solaredge.get_current_power(

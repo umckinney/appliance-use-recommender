@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, AppliancePreset, ModelSearchResult } from "@/lib/api";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
@@ -31,95 +31,148 @@ const iconFor: Record<string, string> = {
 
 type Override = { cycle_kwh: string; cycle_minutes: string };
 
-function ModelSearch({
+function BrandModelSearch({
   category,
   onSelect,
 }: {
   category: string;
   onSelect: (r: ModelSearchResult) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ModelSearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [selected, setSelected] = useState<ModelSearchResult | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [brands, setBrands] = useState<string[]>([]);
+  const [brandQuery, setBrandQuery] = useState("");
+  const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelSearchResult[]>([]);
+  const [modelQuery, setModelQuery] = useState("");
+  const [loadingBrands, setLoadingBrands] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [applied, setApplied] = useState<ModelSearchResult | null>(null);
 
-  function handleChange(val: string) {
-    setQuery(val);
-    setSelected(null);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (!val.trim()) {
-      setResults([]);
-      setSearched(false);
-      return;
+  useEffect(() => {
+    setLoadingBrands(true);
+    api.getBrands(category)
+      .then(setBrands)
+      .catch(() => setBrands([]))
+      .finally(() => setLoadingBrands(false));
+  }, [category]);
+
+  async function handleBrandSelect(brand: string) {
+    setSelectedBrand(brand);
+    setBrandQuery(brand);
+    setModelQuery("");
+    setModels([]);
+    setApplied(null);
+    setLoadingModels(true);
+    try {
+      const res = await api.getModelsForBrand(category, brand);
+      setModels(res);
+    } catch {
+      setModels([]);
+    } finally {
+      setLoadingModels(false);
     }
-    timerRef.current = setTimeout(async () => {
-      setSearching(true);
-      try {
-        let res = await api.searchModels(category, val);
-        // If no results and query has spaces (e.g. "LG DLEX3900B"), retry with
-        // just the model token — backend handles wildcard prefix matching (DLEX3900*)
-        if (res.length === 0 && val.trim().includes(" ")) {
-          const lastWord = val.trim().split(/\s+/).pop() ?? val;
-          res = await api.searchModels(category, lastWord);
-        }
-        setResults(res.slice(0, 8));
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-        setSearched(true);
-      }
-    }, 300);
   }
 
+  const filteredBrands = brandQuery.trim() && !selectedBrand
+    ? brands.filter((b) => b.toLowerCase().includes(brandQuery.toLowerCase()))
+    : [];
+
+  const filteredModels = modelQuery.trim()
+    ? models.filter((m) => m.model.toLowerCase().includes(modelQuery.toLowerCase()))
+    : models;
+
   return (
-    <div className="mt-2">
-      <label className="block text-xs font-medium text-gray-600 mb-1">
-        Search by brand / model (optional)
-      </label>
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder="e.g. Bosch, Samsung"
-        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
-      {searching && (
-        <p className="text-xs text-gray-400 mt-1 animate-pulse">Searching ENERGY STAR…</p>
-      )}
-      {searched && !searching && results.length === 0 && query.trim() && !selected && (
-        <p className="text-xs text-gray-400 mt-1">No ENERGY STAR results found — enter values manually.</p>
-      )}
-      {selected && (
-        <p className="text-xs text-green-600 mt-1">✓ {selected.brand} {selected.model} — values applied</p>
-      )}
-      {results.length > 0 && (
-        <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-48 overflow-y-auto">
-          {results.map((r, i) => (
-            <li key={i}>
-              <button
-                type="button"
-                onClick={() => {
-                  onSelect(r);
-                  setSelected(r);
-                  setQuery(`${r.brand} ${r.model}`);
-                  setResults([]);
-                }}
-                className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 transition-colors"
-              >
-                <span className="font-medium text-gray-800">
-                  {r.brand} {r.model}
-                </span>
-                <span className="text-gray-500 ml-2">
-                  {r.cycle_kwh} kWh
-                  {r.cycle_minutes ? ` · ${r.cycle_minutes} min` : ""}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+    <div className="mt-2 space-y-2">
+      {/* Brand selector */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          Brand (optional)
+        </label>
+        <input
+          type="text"
+          value={brandQuery}
+          onChange={(e) => {
+            setBrandQuery(e.target.value);
+            setSelectedBrand(null);
+            setModels([]);
+            setApplied(null);
+          }}
+          placeholder="e.g. LG, Bosch, Samsung"
+          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {loadingBrands && (
+          <p className="text-xs text-gray-400 mt-1 animate-pulse">Loading brands…</p>
+        )}
+        {filteredBrands.length > 0 && (
+          <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-36 overflow-y-auto">
+            {filteredBrands.slice(0, 8).map((b) => (
+              <li key={b}>
+                <button
+                  type="button"
+                  onClick={() => handleBrandSelect(b)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 transition-colors text-gray-800"
+                >
+                  {b}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Model selector — shown once brand is chosen */}
+      {selectedBrand && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            Model number
+          </label>
+          {loadingModels ? (
+            <p className="text-xs text-gray-400 animate-pulse">Loading {selectedBrand} models…</p>
+          ) : (
+            <>
+              <input
+                type="text"
+                value={modelQuery}
+                onChange={(e) => { setModelQuery(e.target.value); setApplied(null); }}
+                placeholder={`e.g. ${models[0]?.model ?? "model number"}`}
+                className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {applied && (
+                <p className="text-xs text-green-600 mt-1">
+                  ✓ {applied.brand} {applied.model} — values applied
+                </p>
+              )}
+              {!applied && modelQuery && filteredModels.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1">
+                  No ENERGY STAR results for &ldquo;{modelQuery}&rdquo; — enter values manually.
+                </p>
+              )}
+              {filteredModels.length > 0 && !applied && (
+                <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-48 overflow-y-auto">
+                  {filteredModels.slice(0, 8).map((r, i) => (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelect(r);
+                          setApplied(r);
+                          setModelQuery(r.model);
+                          setModels([]);
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 transition-colors"
+                      >
+                        <span className="font-medium text-gray-800">{r.model}</span>
+                        <span className="text-gray-500 ml-2">
+                          {r.cycle_kwh} kWh
+                          {r.cycle_minutes ? ` · ${r.cycle_minutes} min` : ""}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -260,8 +313,8 @@ export default function StepAppliances({ initial, onNext, onBack }: Props) {
                 {isOpen && (
                   <div className="border border-blue-100 bg-blue-50/50 rounded-xl px-4 py-3 mt-0.5 space-y-3">
                     {SEARCHABLE.has(p.slug) && (
-                      <ModelSearch
-                        category={p.slug === "washer" ? "washer" : p.slug}
+                      <BrandModelSearch
+                        category={p.slug}
                         onSelect={(r) => {
                           setOverrides((o) => ({
                             ...o,
@@ -271,7 +324,7 @@ export default function StepAppliances({ initial, onNext, onBack }: Props) {
                             },
                           }));
                         }}
-                      />
+                        />
                     )}
 
                     <div className="grid grid-cols-2 gap-3">

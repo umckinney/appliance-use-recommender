@@ -1,12 +1,18 @@
-"""ENERGY STAR Certified Products API client.
+"""ENERGY STAR Certified Products — bulk cache with change detection.
 
 Covers dishwashers, clothes washers, and dryers only.
-Pool pumps, HVAC, and EV chargers remain as manual entry.
 
 Per-cycle kWh derived from EIA RECS annual cycle counts:
   dishwasher: 215 cycles/year
   washer:     392 cycles/year
   dryer:      283 cycles/year  (also provides test_cycle_time_minutes directly)
+
+Cache strategy:
+- Full dataset per category is fetched once and held in memory for CACHE_TTL_SECONDS.
+- On TTL expiry, the Socrata metadata endpoint is checked for rowsUpdatedAt. If the
+  dataset hasn't changed since our last fetch, the TTL is reset without downloading data.
+  Only an actual dataset update triggers a new bulk download.
+- Net result: full download only on cold start + real ENERGY STAR DB updates (~monthly).
 """
 
 from __future__ import annotations
@@ -16,8 +22,7 @@ from typing import Any
 
 import httpx
 
-_CACHE: dict[str, tuple[float, list[dict]]] = {}
-CACHE_TTL_SECONDS = 3600 * 12  # ENERGY STAR data updates monthly at most
+CACHE_TTL_SECONDS = 3600 * 12  # 12 hours between metadata checks
 
 DATASETS: dict[str, tuple[str, int]] = {
     "dishwasher": ("q8py-6w3f", 215),
@@ -26,72 +31,108 @@ DATASETS: dict[str, tuple[str, int]] = {
 }
 
 _BASE = "https://data.energystar.gov/resource"
+_META_BASE = "https://data.energystar.gov/api/views"
+
+# (fetched_at, rows_updated_at, normalized_records)
+_FULL_CACHE: dict[str, tuple[float, str, list[dict]]] = {}
 
 
-async def search_models(category: str, query: str, limit: int = 20) -> list[dict]:
-    """Search ENERGY STAR certified products for a given category and query string.
-
-    Returns normalized list:
-      [{"brand": str, "model": str, "cycle_kwh": float, "cycle_minutes": int | None}]
-    cycle_minutes is populated for dryers (from test_cycle_time), None for others.
-    """
+async def get_all_models(category: str) -> list[dict]:
+    """Return all normalized models for a category, using bulk cache with change detection."""
     if category not in DATASETS:
         raise ValueError(f"Unsupported category {category!r}. Use: {list(DATASETS)}")
 
-    cache_key = f"{category}:{query}:{limit}"
-    cached = _CACHE.get(cache_key)
-    if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:
-        return cached[1]
-
     dataset_id, annual_cycles = DATASETS[category]
+    now = time.time()
+    cached = _FULL_CACHE.get(category)
 
-    # Socrata full-text search ($q) matches exact tokens, so "DLEX3900B" won't
-    # find a record stored as "DLEX3900*". We progressively strip the rightmost
-    # character from the model token until Socrata returns rows, then post-filter
-    # so that wildcard records (e.g. "DLEX3900*") only appear when the user's
-    # original query starts with the prefix before the "*".
-    words = query.split()
-    last_word = words[-1]
-    rows: list[dict] = []
-    search_query = query
+    if cached:
+        fetched_at, cached_rows_updated_at, records = cached
+        if now - fetched_at < CACHE_TTL_SECONDS:
+            return records
 
-    for _ in range(6):
+        # TTL expired — check metadata before re-downloading
         try:
-            rows = await _fetch_raw(dataset_id, search_query, limit)
+            rows_updated_at = await _fetch_rows_updated_at(dataset_id)
+            if rows_updated_at == cached_rows_updated_at:
+                # Dataset unchanged — reset TTL, keep records
+                _FULL_CACHE[category] = (now, cached_rows_updated_at, records)
+                return records
         except Exception:
-            rows = []
-        if rows:
-            break
-        if len(last_word) <= 3:
-            break
-        last_word = last_word[:-1]
-        search_query = " ".join(words[:-1] + [last_word]) if len(words) > 1 else last_word
+            # Metadata check failed — reset TTL conservatively, serve stale
+            _FULL_CACHE[category] = (now, cached_rows_updated_at, records)
+            return records
 
-    results = _normalize(category, rows, annual_cycles, original_query=query)
-    _CACHE[cache_key] = (time.time(), results)
-    return results
+    # Cold start or dataset changed — fetch full dataset
+    rows_updated_at = ""
+    try:
+        rows_updated_at = await _fetch_rows_updated_at(dataset_id)
+    except Exception:
+        pass
+
+    try:
+        rows = await _fetch_all_raw(dataset_id)
+    except Exception:
+        rows = []
+
+    records = _normalize(category, rows, annual_cycles)
+    _FULL_CACHE[category] = (now, rows_updated_at, records)
+    return records
 
 
-async def _fetch_raw(dataset_id: str, query: str, limit: int) -> list[dict]:
-    url = f"{_BASE}/{dataset_id}.json"
-    params: dict[str, Any] = {"$limit": limit}
-    if query:
-        params["$q"] = query
+async def get_brands(category: str) -> list[str]:
+    """Return sorted list of unique brand names for a category."""
+    records = await get_all_models(category)
+    brands = sorted({r["brand"] for r in records if r["brand"]})
+    return brands
+
+
+async def get_models_for_brand(category: str, brand: str) -> list[dict]:
+    """Return all models for a specific brand within a category."""
+    records = await get_all_models(category)
+    return [r for r in records if r["brand"].lower() == brand.lower()]
+
+
+async def search_models(category: str, query: str, limit: int = 20) -> list[dict]:
+    """Filter cached models by query string (brand or model match). Kept for compat."""
+    records = await get_all_models(category)
+    q = query.strip().lower()
+    if not q:
+        return records[:limit]
+    matches = [
+        r for r in records
+        if q in r["brand"].lower() or q in r["model"].lower()
+    ]
+    return matches[:limit]
+
+
+async def _fetch_rows_updated_at(dataset_id: str) -> str:
+    """Fetch the rowsUpdatedAt timestamp from Socrata dataset metadata."""
+    url = f"{_META_BASE}/{dataset_id}.json"
     async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        meta = resp.json()
+    return str(meta.get("rowsUpdatedAt", ""))
+
+
+async def _fetch_all_raw(dataset_id: str) -> list[dict]:
+    url = f"{_BASE}/{dataset_id}.json"
+    params: dict[str, Any] = {"$limit": 10000}
+    async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url, params=params)
         resp.raise_for_status()
         return resp.json()
 
 
-def _normalize(category: str, rows: list[dict], annual_cycles: int, original_query: str = "") -> list[dict]:
+def _normalize(category: str, rows: list[dict], annual_cycles: int) -> list[dict]:
     results = []
     for row in rows:
         try:
-            # Field names vary by dataset (confirmed against live Socrata responses)
             annual_kwh_str = (
-                row.get("annual_energy_use_kwh_year")          # dishwasher + washer
-                or row.get("estimated_annual_energy_use_kwh_yr")  # dryer
-                or row.get("estimated_annual_energy_use_kwh")  # legacy fallback
+                row.get("annual_energy_use_kwh_year")
+                or row.get("estimated_annual_energy_use_kwh_yr")
+                or row.get("estimated_annual_energy_use_kwh")
             )
             if annual_kwh_str is None:
                 continue
@@ -101,8 +142,8 @@ def _normalize(category: str, rows: list[dict], annual_cycles: int, original_que
             cycle_minutes: int | None = None
             if category == "dryer":
                 raw_min = (
-                    row.get("estimated_energy_test_cycle_time_min")  # actual field name
-                    or row.get("test_cycle_time_minutes")            # legacy fallback
+                    row.get("estimated_energy_test_cycle_time_min")
+                    or row.get("test_cycle_time_minutes")
                 )
                 if raw_min is not None:
                     cycle_minutes = int(float(raw_min))
@@ -112,15 +153,10 @@ def _normalize(category: str, rows: list[dict], annual_cycles: int, original_que
             if not brand and not model:
                 continue
 
-            # Wildcard prefix matching: ENERGY STAR stores some models as e.g.
-            # "DLEX3900*" meaning the cert covers all variants. Treat "*" as a
-            # prefix wildcard — only include the result if the user's model token
-            # starts with the prefix before "*".
-            if "*" in model and original_query:
-                model_prefix = model.split("*")[0].upper()
-                query_model_token = original_query.split()[-1].upper()
-                if not query_model_token.startswith(model_prefix):
-                    continue
+            # Wildcard prefix matching: strip suffix starting at "*"
+            # e.g. "DLEX3900*" → prefix "DLEX3900", "WM3900H*A" → prefix "WM3900H"
+            if "*" in model:
+                model = model[: model.index("*")] + "*"
 
             results.append(
                 {

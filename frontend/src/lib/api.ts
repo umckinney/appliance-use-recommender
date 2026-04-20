@@ -130,6 +130,14 @@ export const api = {
       { method: "DELETE" }
     ),
 
+  getBrands: (category: string) =>
+    request<string[]>(`/appliances/brands?category=${encodeURIComponent(category)}`),
+
+  getModelsForBrand: (category: string, brand: string) =>
+    request<ModelSearchResult[]>(
+      `/appliances/models?category=${encodeURIComponent(category)}&brand=${encodeURIComponent(brand)}`
+    ),
+
   searchModels: (category: string, q: string) =>
     request<ModelSearchResult[]>(
       `/appliances/search?category=${encodeURIComponent(category)}&q=${encodeURIComponent(q)}`

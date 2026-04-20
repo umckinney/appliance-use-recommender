@@ -80,6 +80,32 @@ async def delete_appliance(
     await db.commit()
 
 
+@router.get("/brands")
+async def list_brands(category: str) -> list[str]:
+    """Return sorted unique brand names for a category. No auth required.
+
+    category: one of dishwasher | washer | dryer
+    Triggers a bulk dataset fetch on cold start; subsequent calls serve from cache.
+    """
+    try:
+        return await energystar.get_brands(category)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/models", response_model=list[ModelSearchResult])
+async def list_models_for_brand(category: str, brand: str) -> list[ModelSearchResult]:
+    """Return all ENERGY STAR models for a brand+category. No auth required.
+
+    Returns full data (cycle_kwh, cycle_minutes) for client-side model selection.
+    cycle_minutes is populated for dryers only; None for dishwashers/washers.
+    """
+    try:
+        return await energystar.get_models_for_brand(category, brand)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/search", response_model=list[ModelSearchResult])
 async def search_appliances(category: str, q: str = "", limit: int = 20):
     """Search ENERGY STAR certified products. No auth required — public data.

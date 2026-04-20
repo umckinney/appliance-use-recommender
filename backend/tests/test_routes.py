@@ -226,7 +226,7 @@ class TestRecommend:
                 return_value=MOCK_GRID,
             ),
             patch(
-                "backend.routers.recommend.open_meteo.get_solar_forecast",
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
                 new_callable=AsyncMock,
                 return_value=MOCK_WEATHER,
             ),
@@ -255,7 +255,7 @@ class TestRecommend:
                 return_value=MOCK_GRID,
             ),
             patch(
-                "backend.routers.recommend.open_meteo.get_solar_forecast",
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
                 new_callable=AsyncMock,
                 return_value=MOCK_WEATHER,
             ),
@@ -287,7 +287,7 @@ class TestRecommend:
                 return_value=MOCK_GRID,
             ),
             patch(
-                "backend.routers.recommend.open_meteo.get_solar_forecast",
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
                 new_callable=AsyncMock,
                 return_value=MOCK_WEATHER,
             ),
@@ -347,7 +347,7 @@ class TestForecast:
                 return_value=MOCK_GRID,
             ),
             patch(
-                "backend.routers.forecast.open_meteo.get_solar_forecast",
+                "backend.routers.forecast.solar_integration.get_solar_forecast",
                 new_callable=AsyncMock,
                 return_value=MOCK_WEATHER,
             ),
@@ -373,7 +373,7 @@ class TestForecast:
                 return_value=MOCK_GRID,
             ),
             patch(
-                "backend.routers.forecast.open_meteo.get_solar_forecast",
+                "backend.routers.forecast.solar_integration.get_solar_forecast",
                 new_callable=AsyncMock,
                 return_value=MOCK_WEATHER,
             ),
@@ -406,7 +406,7 @@ class TestForecast:
                 return_value=MOCK_GRID,
             ),
             patch(
-                "backend.routers.forecast.open_meteo.get_solar_forecast",
+                "backend.routers.forecast.solar_integration.get_solar_forecast",
                 new_callable=AsyncMock,
                 return_value=MOCK_WEATHER,
             ),

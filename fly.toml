@@ -1,5 +1,5 @@
 app = "flowshift"
-primary_region = "sea"  # Seattle — closest to BPA grid
+primary_region = "sjc"  # San Jose — closest available to Pacific Northwest
 
 [build]
   dockerfile = "Dockerfile"
