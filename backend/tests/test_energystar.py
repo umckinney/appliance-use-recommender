@@ -79,6 +79,7 @@ class TestSearchModels:
     @pytest.mark.asyncio
     async def test_search_returns_empty_on_http_error(self):
         from backend.integrations import energystar as es
+
         es._FULL_CACHE.clear()
 
         with (
@@ -107,6 +108,7 @@ class TestSearchModels:
             }
         ]
         from backend.integrations import energystar as es
+
         es._FULL_CACHE.clear()
 
         with (
@@ -133,6 +135,7 @@ class TestSearchModels:
             {"brand_name": "LG", "model_number": "LDP6809", "annual_energy_use_kwh_year": "220"},
         ]
         from backend.integrations import energystar as es
+
         es._FULL_CACHE.clear()
 
         with (
