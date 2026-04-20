@@ -40,6 +40,7 @@ function BrandModelSearch({
 }) {
   const [brands, setBrands] = useState<string[]>([]);
   const [brandQuery, setBrandQuery] = useState("");
+  const [brandFocused, setBrandFocused] = useState(false);
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const [models, setModels] = useState<ModelSearchResult[]>([]);
   const [modelQuery, setModelQuery] = useState("");
@@ -58,6 +59,7 @@ function BrandModelSearch({
   async function handleBrandSelect(brand: string) {
     setSelectedBrand(brand);
     setBrandQuery(brand);
+    setBrandFocused(false);
     setModelQuery("");
     setModels([]);
     setApplied(null);
@@ -72,12 +74,28 @@ function BrandModelSearch({
     }
   }
 
-  const filteredBrands = brandQuery.trim() && !selectedBrand
-    ? brands.filter((b) => b.toLowerCase().includes(brandQuery.toLowerCase()))
+  // Fuzzy-ranked brand list: startsWith matches first, then contains
+  const filteredBrands = !selectedBrand && (brandFocused || brandQuery.trim())
+    ? (() => {
+        const q = brandQuery.trim().toLowerCase();
+        if (!q) return brands.slice(0, 8);
+        const starts = brands.filter((b) => b.toLowerCase().startsWith(q));
+        const contains = brands.filter(
+          (b) => !b.toLowerCase().startsWith(q) && b.toLowerCase().includes(q)
+        );
+        return [...starts, ...contains].slice(0, 8);
+      })()
     : [];
 
   const filteredModels = modelQuery.trim()
-    ? models.filter((m) => m.model.toLowerCase().includes(modelQuery.toLowerCase()))
+    ? (() => {
+        const q = modelQuery.trim().toLowerCase();
+        const starts = models.filter((m) => m.model.toLowerCase().startsWith(q));
+        const contains = models.filter(
+          (m) => !m.model.toLowerCase().startsWith(q) && m.model.toLowerCase().includes(q)
+        );
+        return [...starts, ...contains];
+      })()
     : models;
 
   return (
@@ -85,29 +103,30 @@ function BrandModelSearch({
       {/* Brand selector */}
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">
-          Brand (optional)
+          Brand <span className="text-gray-400">(optional — auto-fills energy data)</span>
         </label>
         <input
           type="text"
           value={brandQuery}
+          onFocus={() => setBrandFocused(true)}
+          onBlur={() => setTimeout(() => setBrandFocused(false), 150)}
           onChange={(e) => {
             setBrandQuery(e.target.value);
             setSelectedBrand(null);
             setModels([]);
             setApplied(null);
           }}
-          placeholder="e.g. LG, Bosch, Samsung"
-          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder={loadingBrands ? "Loading brands…" : "e.g. LG, Bosch, Samsung"}
+          disabled={loadingBrands}
+          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
         />
-        {loadingBrands && (
-          <p className="text-xs text-gray-400 mt-1 animate-pulse">Loading brands…</p>
-        )}
         {filteredBrands.length > 0 && (
-          <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-36 overflow-y-auto">
-            {filteredBrands.slice(0, 8).map((b) => (
+          <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-36 overflow-y-auto shadow-sm">
+            {filteredBrands.map((b) => (
               <li key={b}>
                 <button
                   type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => handleBrandSelect(b)}
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 transition-colors text-gray-800"
                 >
@@ -133,7 +152,7 @@ function BrandModelSearch({
                 type="text"
                 value={modelQuery}
                 onChange={(e) => { setModelQuery(e.target.value); setApplied(null); }}
-                placeholder={`e.g. ${models[0]?.model ?? "model number"}`}
+                placeholder={`Type model number (e.g. ${models[0]?.model ?? "WM3900HBA"})`}
                 className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               {applied && (
@@ -143,11 +162,11 @@ function BrandModelSearch({
               )}
               {!applied && modelQuery && filteredModels.length === 0 && (
                 <p className="text-xs text-gray-400 mt-1">
-                  No ENERGY STAR results for &ldquo;{modelQuery}&rdquo; — enter values manually.
+                  No ENERGY STAR results for &ldquo;{modelQuery}&rdquo; — enter values manually below.
                 </p>
               )}
               {filteredModels.length > 0 && !applied && (
-                <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-48 overflow-y-auto">
+                <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-48 overflow-y-auto shadow-sm">
                   {filteredModels.slice(0, 8).map((r, i) => (
                     <li key={i}>
                       <button
@@ -169,6 +188,15 @@ function BrandModelSearch({
                     </li>
                   ))}
                 </ul>
+              )}
+              {!applied && (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedBrand(null); setBrandQuery(""); setModels([]); }}
+                  className="text-xs text-gray-400 hover:text-gray-600 mt-1"
+                >
+                  ← Change brand
+                </button>
               )}
             </>
           )}
@@ -286,6 +314,15 @@ export default function StepAppliances({ initial, onNext, onBack }: Props) {
                   className={`w-full rounded-xl border-2 px-4 py-3 text-left flex items-center gap-3 transition-colors
                     ${on ? "border-blue-600 bg-blue-50" : "border-gray-200 hover:border-gray-300"}`}
                 >
+                  {/* Checkbox indicator */}
+                  <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors
+                    ${on ? "border-blue-600 bg-blue-600" : "border-gray-300 bg-white"}`}>
+                    {on && (
+                      <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
+                        <path d="M1.5 5.5L3.5 7.5L8.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </div>
                   <span className="text-xl shrink-0">{iconFor[p.slug] ?? "🔌"}</span>
                   <div className="flex-1 min-w-0">
                     <div className={`text-sm font-medium ${on ? "text-blue-700" : "text-gray-700"}`}>

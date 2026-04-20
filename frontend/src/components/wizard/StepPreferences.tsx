@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
@@ -54,7 +55,15 @@ export default function StepPreferences({ initial, onNext, onBack }: Props) {
 
   return (
     <Card>
-      <h2 className="text-xl font-semibold text-gray-900 mb-1">A few last details</h2>
+      <div className="flex items-start justify-between mb-1">
+        <h2 className="text-xl font-semibold text-gray-900">A few last details</h2>
+        <Link
+          href="/auth/login"
+          className="text-xs text-blue-600 hover:underline shrink-0 ml-4 mt-1"
+        >
+          Already have an account? Sign in →
+        </Link>
+      </div>
       <p className="text-sm text-gray-500 mb-6">
         Optional, but helps personalise your experience.
       </p>

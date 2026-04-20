@@ -22,7 +22,7 @@ export default function Home() {
             Get started →
           </Link>
           <a
-            href="https://github.com/your-org/flowshift"
+            href="https://github.com/umckinney/appliance-use-recommender"
             target="_blank"
             rel="noreferrer"
             className="px-6 py-3 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-200 shadow-sm transition-colors"

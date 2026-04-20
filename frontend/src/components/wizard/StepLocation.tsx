@@ -332,42 +332,22 @@ export default function StepLocation({ initial, onNext }: Props) {
           </div>
         )}
 
-        {/* Manual utility fallback when ZIP has no data */}
-        {showManualFallback && postalCode.length === 0 && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Electric utility
-            </label>
-            <select
-              className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              value={manualUtility}
-              onChange={(e) => setManualUtility(e.target.value)}
-            >
-              {YAML_UTILITIES.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-400 mt-1">
-              Not listed?{" "}
-              <a
-                href="https://github.com/your-org/flowshift"
-                className="text-blue-500 hover:underline"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Contribute a rate file
-              </a>
-            </p>
-          </div>
-        )}
+        {/* Manual utility fallback — only shown after a ZIP is entered with no results */}
 
         {/* No utility found for entered ZIP */}
         {showManualFallback && postalCode.length === 5 && results?.length === 0 && (
           <div>
             <p className="text-xs text-gray-500 mb-2">
-              No utility data found for this ZIP. Select from known utilities:
+              No utility data found for this ZIP. Select from known utilities or{" "}
+              <a
+                href="https://github.com/umckinney/appliance-use-recommender"
+                className="text-blue-500 hover:underline"
+                target="_blank"
+                rel="noreferrer"
+              >
+                contribute a rate file
+              </a>
+              :
             </p>
             <select
               className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
