@@ -5,7 +5,7 @@ Create Date: 2026-04-19
 """
 
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 from alembic import op
 
@@ -16,10 +16,19 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade() -> None:
-    existing = inspect(op.get_bind()).get_table_names()
+def _try(label: str, fn):
+    """Run fn(); on any error rollback to savepoint and continue."""
+    bind = op.get_bind()
+    bind.execute(text(f"SAVEPOINT {label}"))
+    try:
+        fn()
+        bind.execute(text(f"RELEASE SAVEPOINT {label}"))
+    except Exception:
+        bind.execute(text(f"ROLLBACK TO SAVEPOINT {label}"))
 
-    if "users" not in existing:
+
+def upgrade() -> None:
+    def _users():
         op.create_table(
             "users",
             sa.Column("id", sa.Integer(), nullable=False),
@@ -38,7 +47,9 @@ def upgrade() -> None:
             sa.Column("timezone", sa.String(length=64), nullable=True),
             sa.Column("utility_id", sa.String(length=64), nullable=True),
             sa.Column("rate_plan", sa.String(length=64), nullable=True),
-            sa.Column("net_metering", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+            sa.Column(
+                "net_metering", sa.Boolean(), nullable=False, server_default=sa.text("0")
+            ),
             sa.Column("has_solar", sa.Boolean(), nullable=False, server_default=sa.text("0")),
             sa.Column("solar_capacity_kw", sa.Float(), nullable=True),
             sa.Column("solar_tilt_deg", sa.Float(), nullable=True),
@@ -56,8 +67,9 @@ def upgrade() -> None:
             sa.UniqueConstraint("email"),
         )
         op.create_index("ix_users_api_key", "users", ["api_key"], unique=True)
+    _try("tbl_users", _users)
 
-    if "appliances" not in existing:
+    def _appliances():
         op.create_table(
             "appliances",
             sa.Column("id", sa.Integer(), nullable=False),
@@ -70,6 +82,7 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
             sa.PrimaryKeyConstraint("id"),
         )
+    _try("tbl_appliances", _appliances)
 
 
 def downgrade() -> None:

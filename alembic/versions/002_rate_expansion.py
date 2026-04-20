@@ -8,7 +8,7 @@ Create Date: 2026-04-19
 """
 
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 from alembic import op
 
@@ -17,24 +17,35 @@ down_revision = "001"
 branch_labels = None
 depends_on = None
 
+_SP = "sp_002"  # savepoint name reused for each idempotent block
+
+
+def _try(label: str, fn):
+    """Run fn(); on any error rollback to savepoint and continue."""
+    bind = op.get_bind()
+    bind.execute(text(f"SAVEPOINT {label}"))
+    try:
+        fn()
+        bind.execute(text(f"RELEASE SAVEPOINT {label}"))
+    except Exception:
+        bind.execute(text(f"ROLLBACK TO SAVEPOINT {label}"))
+
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    insp = inspect(bind)
-    existing_tables = insp.get_table_names()
-    existing_user_cols = {c["name"] for c in insp.get_columns("users")}
+    _try("col_utility_name", lambda: op.add_column(
+        "users", sa.Column("utility_name", sa.String(length=256), nullable=True)
+    ))
+    _try("col_utility_eia_id", lambda: op.add_column(
+        "users", sa.Column("utility_eia_id", sa.Integer(), nullable=True)
+    ))
+    _try("col_utility_rate_avg", lambda: op.add_column(
+        "users", sa.Column("utility_rate_avg", sa.Float(), nullable=True)
+    ))
+    _try("col_utility_tier", lambda: op.add_column(
+        "users", sa.Column("utility_tier", sa.Integer(), nullable=True)
+    ))
 
-    # New columns on users
-    if "utility_name" not in existing_user_cols:
-        op.add_column("users", sa.Column("utility_name", sa.String(length=256), nullable=True))
-    if "utility_eia_id" not in existing_user_cols:
-        op.add_column("users", sa.Column("utility_eia_id", sa.Integer(), nullable=True))
-    if "utility_rate_avg" not in existing_user_cols:
-        op.add_column("users", sa.Column("utility_rate_avg", sa.Float(), nullable=True))
-    if "utility_tier" not in existing_user_cols:
-        op.add_column("users", sa.Column("utility_tier", sa.Integer(), nullable=True))
-
-    if "utility" not in existing_tables:
+    def _utility():
         op.create_table(
             "utility",
             sa.Column("eia_id", sa.Integer(), nullable=False),
@@ -49,8 +60,9 @@ def upgrade() -> None:
             ),
             sa.PrimaryKeyConstraint("eia_id"),
         )
+    _try("tbl_utility", _utility)
 
-    if "zipcode_utility" not in existing_tables:
+    def _zipcode_utility():
         op.create_table(
             "zipcode_utility",
             sa.Column("zipcode", sa.String(length=10), nullable=False),
@@ -62,8 +74,9 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("zipcode", "eia_id"),
         )
         op.create_index("ix_zipcode_utility_zipcode", "zipcode_utility", ["zipcode"])
+    _try("tbl_zipcode_utility", _zipcode_utility)
 
-    if "zip_centroid" not in existing_tables:
+    def _zip_centroid():
         op.create_table(
             "zip_centroid",
             sa.Column("zipcode", sa.String(length=10), nullable=False),
@@ -71,8 +84,9 @@ def upgrade() -> None:
             sa.Column("lng", sa.Float(), nullable=False),
             sa.PrimaryKeyConstraint("zipcode"),
         )
+    _try("tbl_zip_centroid", _zip_centroid)
 
-    if "urdb_rate" not in existing_tables:
+    def _urdb_rate():
         op.create_table(
             "urdb_rate",
             sa.Column("urdb_label", sa.String(length=64), nullable=False),
@@ -93,8 +107,9 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["eia_id"], ["utility.eia_id"]),
             sa.PrimaryKeyConstraint("urdb_label"),
         )
+    _try("tbl_urdb_rate", _urdb_rate)
 
-    if "rate_ingestion_run" not in existing_tables:
+    def _rate_ingestion_run():
         op.create_table(
             "rate_ingestion_run",
             sa.Column("id", sa.Integer(), nullable=False),
@@ -118,6 +133,7 @@ def upgrade() -> None:
             sa.Column("error_log", sa.Text(), nullable=True),
             sa.PrimaryKeyConstraint("id"),
         )
+    _try("tbl_rate_ingestion_run", _rate_ingestion_run)
 
 
 def downgrade() -> None:

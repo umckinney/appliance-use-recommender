@@ -5,7 +5,7 @@ Create Date: 2026-04-20
 """
 
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 from alembic import op
 
@@ -15,10 +15,19 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade() -> None:
-    existing_tables = inspect(op.get_bind()).get_table_names()
+def _try(label: str, fn):
+    """Run fn(); on any error rollback to savepoint and continue."""
+    bind = op.get_bind()
+    bind.execute(text(f"SAVEPOINT {label}"))
+    try:
+        fn()
+        bind.execute(text(f"RELEASE SAVEPOINT {label}"))
+    except Exception:
+        bind.execute(text(f"ROLLBACK TO SAVEPOINT {label}"))
 
-    if "user_session" not in existing_tables:
+
+def upgrade() -> None:
+    def _user_session():
         op.create_table(
             "user_session",
             sa.Column("id", sa.String(length=64), nullable=False),
@@ -35,8 +44,9 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
         )
         op.create_index("ix_user_session_user_id", "user_session", ["user_id"])
+    _try("tbl_user_session", _user_session)
 
-    if "oauth_account" not in existing_tables:
+    def _oauth_account():
         op.create_table(
             "oauth_account",
             sa.Column("id", sa.Integer(), nullable=False),
@@ -54,8 +64,9 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_uid"),
         )
+    _try("tbl_oauth_account", _oauth_account)
 
-    if "magic_link_token" not in existing_tables:
+    def _magic_link_token():
         op.create_table(
             "magic_link_token",
             sa.Column("id", sa.Integer(), nullable=False),
@@ -76,6 +87,7 @@ def upgrade() -> None:
         op.create_index(
             "ix_magic_link_token_hash", "magic_link_token", ["token_hash"], unique=True
         )
+    _try("tbl_magic_link_token", _magic_link_token)
 
 
 def downgrade() -> None:
