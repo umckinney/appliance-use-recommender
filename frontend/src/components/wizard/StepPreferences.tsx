@@ -10,21 +10,47 @@ type Props = {
   onBack: () => void;
 };
 
+const WEIGHT_OPTIONS = [
+  { label: "Save money", emoji: "💰", value: 0.0 },
+  { label: "Balance both", emoji: "⚖️", value: 0.5 },
+  { label: "Minimize carbon", emoji: "🌱", value: 1.0 },
+] as const;
+
+export function WeightSelector({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {WEIGHT_OPTIONS.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={`flex flex-col items-center gap-1 rounded-xl border-2 px-3 py-3 text-center transition-colors
+              ${selected
+                ? "border-blue-600 bg-blue-50 text-blue-700"
+                : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+              }`}
+          >
+            <span className="text-xl">{opt.emoji}</span>
+            <span className="text-xs font-medium leading-tight">{opt.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function StepPreferences({ initial, onNext, onBack }: Props) {
   const [name, setName] = useState(initial.name ?? "");
   const [email, setEmail] = useState(initial.email ?? "");
   const [weight, setWeight] = useState(initial.optimization_weight);
-
-  const weightLabel =
-    weight < 0.2
-      ? "Cost-focused"
-      : weight > 0.8
-        ? "Carbon-focused"
-        : weight === 0.5
-          ? "Balanced"
-          : weight < 0.5
-            ? "Mostly cost"
-            : "Mostly carbon";
 
   return (
     <Card>
@@ -63,24 +89,11 @@ export default function StepPreferences({ initial, onNext, onBack }: Props) {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Optimise for:{" "}
-            <span className="text-blue-600 font-semibold">{weightLabel}</span>
+            Optimise for
           </label>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 w-16 text-right">💰 Cost</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              className="flex-1 accent-blue-600"
-              value={weight}
-              onChange={(e) => setWeight(parseFloat(e.target.value))}
-            />
-            <span className="text-xs text-gray-500 w-16">🌱 Carbon</span>
-          </div>
+          <WeightSelector value={weight} onChange={setWeight} />
           <p className="text-xs text-gray-400 mt-2">
-            You can adjust this per query later via the API.
+            You can change this from the dashboard.
           </p>
         </div>
 
@@ -88,7 +101,15 @@ export default function StepPreferences({ initial, onNext, onBack }: Props) {
           <Button variant="secondary" onClick={onBack}>
             ← Back
           </Button>
-          <Button onClick={() => onNext({ name: name || undefined, email: email || undefined, optimization_weight: weight })}>
+          <Button
+            onClick={() =>
+              onNext({
+                name: name || undefined,
+                email: email || undefined,
+                optimization_weight: weight,
+              })
+            }
+          >
             Create my account →
           </Button>
         </div>
