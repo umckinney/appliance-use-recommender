@@ -72,12 +72,19 @@ def _do_run_migrations(connection) -> None:
 
 async def _run_async_migrations() -> None:
     cfg = alembic_cfg.get_section(alembic_cfg.config_ini_section, {})
-    cfg["sqlalchemy.url"] = _get_async_url()
+    url = _get_async_url()
+    cfg["sqlalchemy.url"] = url
+
+    # Mirror database.py: disable SSL on Postgres (Fly.io internal network).
+    # Without this asyncpg attempts SSL negotiation which raises
+    # TargetServerAttributeNotMatched on the private network.
+    connect_args = {"ssl": False} if url.startswith("postgresql") else {}
 
     connectable = async_engine_from_config(
         cfg,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:
