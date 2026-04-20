@@ -14,7 +14,14 @@ import pytest
 
 MOCK_GRID = {"carbon_g_kwh": 150.0, "zone": "BPA", "total_mw": 8500}
 MOCK_WEATHER = {"hourly": [{"direct_radiation_w_m2": 500, "diffuse_radiation_w_m2": 100}] * 48}
-MOCK_GEO = {"lat": 47.6062, "lon": -122.3321, "timezone": "America/Los_Angeles"}
+MOCK_GEO = {
+    "lat": 47.6062,
+    "lon": -122.3321,
+    "display_name": "Seattle, WA",
+    "country_code": "us",
+    "postcode": "98101",
+    "precise": True,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +33,9 @@ class TestOnboard:
     @pytest.mark.asyncio
     async def test_onboard_creates_user_and_returns_api_key(self, client):
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             resp = await client.post(
                 "/onboard",
@@ -47,7 +56,9 @@ class TestOnboard:
     async def test_onboard_idempotent_same_email(self, client):
         """Calling /onboard twice with the same email updates the user, same API key."""
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             r1 = await client.post(
                 "/onboard",
@@ -72,7 +83,20 @@ class TestOnboard:
 
     @pytest.mark.asyncio
     async def test_onboard_bad_address_returns_422(self, client):
-        with patch("backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=None):
+        _no_location = {
+            "lat": None,
+            "lon": None,
+            "display_name": "",
+            "country_code": "",
+            "postcode": "",
+            "precise": False,
+            "fallback_reason": "Could not determine your location.",
+        }
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=_no_location,
+        ):
             resp = await client.post(
                 "/onboard",
                 json={
@@ -85,7 +109,9 @@ class TestOnboard:
     @pytest.mark.asyncio
     async def test_onboard_creates_default_appliance(self, client):
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             resp = await client.post(
                 "/onboard",
@@ -106,7 +132,9 @@ class TestAppliances:
     @pytest.fixture
     async def api_key(self, client):
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             resp = await client.post(
                 "/onboard",
@@ -197,7 +225,9 @@ class TestRecommend:
     @pytest.fixture
     async def api_key(self, client):
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             resp = await client.post(
                 "/onboard",
@@ -326,7 +356,9 @@ class TestForecast:
     @pytest.fixture
     async def api_key(self, client):
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             resp = await client.post(
                 "/onboard",
@@ -440,7 +472,9 @@ class TestStatus:
     @pytest.fixture
     async def api_key(self, client):
         with patch(
-            "backend.routers.onboard.geocode", new_callable=AsyncMock, return_value=MOCK_GEO
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
         ):
             resp = await client.post(
                 "/onboard",
@@ -475,3 +509,257 @@ class TestStatus:
         assert body["solar_kw"] is None
         assert "current_rate_usd_kwh" in body
         assert "rate_period" in body
+
+
+# ---------------------------------------------------------------------------
+# /account
+# ---------------------------------------------------------------------------
+
+
+class TestAccount:
+    @pytest.fixture
+    async def api_key(self, client):
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
+        ):
+            resp = await client.post(
+                "/onboard",
+                json={"address": "123 Main St, Seattle WA", "utility_id": "seattle_city_light"},
+            )
+        return resp.json()["api_key"]
+
+    @pytest.mark.asyncio
+    async def test_update_preferences_stores_weight(self, client, api_key):
+        resp = await client.patch(
+            f"/account/preferences?api_key={api_key}",
+            json={"optimization_weight": 0.0},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["optimization_weight"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_update_preferences_invalid_key_returns_401(self, client):
+        resp = await client.patch(
+            "/account/preferences?api_key=bad-key",
+            json={"optimization_weight": 0.5},
+        )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_update_preferences_out_of_range_returns_422(self, client, api_key):
+        resp = await client.patch(
+            f"/account/preferences?api_key={api_key}",
+            json={"optimization_weight": 1.5},
+        )
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# /recommend/all
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendAll:
+    @pytest.fixture
+    async def api_key(self, client):
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
+        ):
+            resp = await client.post(
+                "/onboard",
+                json={
+                    "address": "123 Main St, Seattle WA",
+                    "utility_id": "seattle_city_light",
+                    "appliances": [
+                        {
+                            "name": "Dishwasher",
+                            "slug": "dishwasher",
+                            "cycle_kwh": 1.5,
+                            "cycle_minutes": 90,
+                        },
+                        {"name": "Dryer", "slug": "dryer", "cycle_kwh": 5.0, "cycle_minutes": 60},
+                    ],
+                },
+            )
+        return resp.json()["api_key"]
+
+    @pytest.mark.asyncio
+    async def test_recommend_all_returns_shared_window(self, client, api_key):
+        with (
+            patch(
+                "backend.routers.recommend.bpa.get_carbon_intensity",
+                new_callable=AsyncMock,
+                return_value=MOCK_GRID,
+            ),
+            patch(
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER,
+            ),
+            patch(
+                "backend.routers.recommend.solaredge.get_current_power",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get(f"/recommend/all?api_key={api_key}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "text" in body
+        assert "best_shared_start" in body
+        assert len(body["per_appliance"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_recommend_all_no_appliances_returns_404(self, client, api_key):
+        # Delete all appliances so the user has none
+        appliances = (await client.get(f"/appliances?api_key={api_key}")).json()
+        for a in appliances:
+            await client.delete(f"/appliances/{a['slug']}?api_key={api_key}")
+
+        with (
+            patch(
+                "backend.routers.recommend.bpa.get_carbon_intensity",
+                new_callable=AsyncMock,
+                return_value=MOCK_GRID,
+            ),
+            patch(
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER,
+            ),
+            patch(
+                "backend.routers.recommend.solaredge.get_current_power",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get(f"/recommend/all?api_key={api_key}")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /shortcuts
+# ---------------------------------------------------------------------------
+
+
+class TestShortcuts:
+    @pytest.fixture
+    async def api_key(self, client):
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
+        ):
+            resp = await client.post(
+                "/onboard",
+                json={
+                    "address": "789 Main St, Seattle WA",
+                    "utility_id": "seattle_city_light",
+                    "appliances": [
+                        {
+                            "name": "Dishwasher",
+                            "slug": "dishwasher",
+                            "cycle_kwh": 1.5,
+                            "cycle_minutes": 90,
+                        },
+                    ],
+                },
+            )
+        return resp.json()["api_key"]
+
+    @pytest.mark.asyncio
+    async def test_shortcut_download_returns_plist(self, client, api_key):
+        resp = await client.get(f"/shortcuts/dishwasher?api_key={api_key}")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/octet-stream"
+        assert ".shortcut" in resp.headers["content-disposition"]
+        assert resp.content[:8] == b"bplist00"
+
+    @pytest.mark.asyncio
+    async def test_shortcut_all_returns_plist(self, client, api_key):
+        resp = await client.get(f"/shortcuts/all?api_key={api_key}")
+        assert resp.status_code == 200
+        assert resp.content[:8] == b"bplist00"
+
+    @pytest.mark.asyncio
+    async def test_shortcut_unknown_slug_returns_404(self, client, api_key):
+        resp = await client.get(f"/shortcuts/nonexistent?api_key={api_key}")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_shortcut_invalid_key_returns_401(self, client):
+        resp = await client.get("/shortcuts/dishwasher?api_key=bad-key")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# get_ba_code + EIA ba_code propagation
+# ---------------------------------------------------------------------------
+
+
+class TestBalancingAuthority:
+    def test_get_ba_code_returns_bpat_for_seattle(self):
+        from backend.engine.rates import get_ba_code
+
+        assert get_ba_code("seattle_city_light") == "BPAT"
+
+    def test_get_ba_code_returns_none_for_unknown_utility(self):
+        from backend.engine.rates import get_ba_code
+
+        assert get_ba_code("nonexistent_utility") is None
+
+    @pytest.mark.asyncio
+    async def test_recommend_passes_ba_code_to_eia(self, client):
+        """EIA get_carbon_forecast should be called with the utility's BA code."""
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
+        ):
+            resp = await client.post(
+                "/onboard",
+                json={
+                    "address": "500 Pike St, Seattle, WA",
+                    "utility_id": "seattle_city_light",
+                    "appliances": [
+                        {
+                            "name": "Dishwasher",
+                            "slug": "dishwasher",
+                            "cycle_kwh": 1.5,
+                            "cycle_minutes": 90,
+                        }
+                    ],
+                },
+            )
+        api_key = resp.json()["api_key"]
+
+        eia_mock = AsyncMock(return_value=None)
+        with (
+            patch(
+                "backend.routers.recommend.bpa.get_carbon_intensity",
+                new_callable=AsyncMock,
+                return_value=MOCK_GRID,
+            ),
+            patch(
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER,
+            ),
+            patch(
+                "backend.routers.recommend.solaredge.get_current_power",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("backend.routers.recommend.eia.get_carbon_forecast", eia_mock),
+            patch("backend.routers.recommend.settings.eia_api_key", new="test-key"),
+        ):
+            await client.get(f"/recommend/dishwasher?api_key={api_key}")
+
+        eia_mock.assert_called_once()
+        _, kwargs = eia_mock.call_args
+        assert kwargs.get("ba_code") == "BPAT"

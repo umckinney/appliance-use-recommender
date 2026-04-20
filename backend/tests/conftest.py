@@ -1,11 +1,21 @@
 """Shared pytest fixtures for FlowShift integration tests."""
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.database import Base, get_db
+from backend.limiter import limiter
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Clear all rate-limit counters before each test so limits don't bleed across tests."""
+    limiter._limiter.storage.reset()
+    yield
+
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 

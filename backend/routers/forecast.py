@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.database import get_db
+from backend.deps import get_api_key
 from backend.engine import rates, solar
-from backend.integrations import bpa, eia, solar as solar_integration, solaredge
+from backend.engine.rates import get_ba_code
+from backend.integrations import bpa, eia, solaredge
+from backend.integrations import solar as solar_integration
 from backend.models import User
 from backend.schemas import ForecastHour, ForecastResponse
 
@@ -26,7 +29,7 @@ async def _get_user(api_key: str, db: AsyncSession) -> User:
 
 
 @router.get("", response_model=ForecastResponse)
-async def forecast(api_key: str, db: AsyncSession = Depends(get_db)):
+async def forecast(api_key: str = Depends(get_api_key), db: AsyncSession = Depends(get_db)):
     user = await _get_user(api_key, db)
 
     tz = zoneinfo.ZoneInfo(user.timezone or "America/Los_Angeles")
@@ -44,11 +47,16 @@ async def forecast(api_key: str, db: AsyncSession = Depends(get_db)):
             api_key=user.solaredge_api_key,
         )
 
-    rate_schedule = rates.get_24h_schedule(user.utility_id, local_now)
+    rate_schedule = rates.get_24h_schedule(
+        user.utility_id, local_now, flat_rate=user.utility_rate_avg
+    )
 
+    ba_code = get_ba_code(user.utility_id) or "BPAT"
     eia_forecast = None
     if settings.eia_api_key:
-        eia_forecast = await eia.get_carbon_forecast(settings.eia_api_key, hours=len(rate_schedule))
+        eia_forecast = await eia.get_carbon_forecast(
+            settings.eia_api_key, hours=len(rate_schedule), ba_code=ba_code
+        )
     hourly = weather.get("hourly", [])
 
     hours: list[ForecastHour] = []

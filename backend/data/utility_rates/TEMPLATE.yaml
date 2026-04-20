@@ -7,6 +7,7 @@ utility_name: Your Utility Name
 currency: USD                         # ISO 4217
 last_verified: YYYY-MM-DD            # date you confirmed rates against official source
 source_url: https://...              # direct link to official rate schedule page
+balancing_authority: BPAT            # EIA balancing authority code — see https://www.eia.gov/electricity/gridmonitor/
 
 # Supported schedule types:
 #   - weekday/weekend split (most common)

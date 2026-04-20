@@ -10,6 +10,7 @@ utility_name: Seattle City Light
 currency: USD
 last_verified: 2026-01-01
 source_url: https://www.seattle.gov/city-light/customers/billing/rates
+balancing_authority: BPAT
 
 # Rate periods by day type and hour (local time, 24h)
 # Periods: off_peak, mid_peak, peak

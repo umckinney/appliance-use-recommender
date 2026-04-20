@@ -32,15 +32,17 @@ EIA_FUEL_MAP: dict[str, str] = {
     "OTH": "other",
 }
 
-CACHE_TTL_SECONDS = 1800  # 30 minutes
+CACHE_TTL_SECONDS = 3300  # 55 minutes — EIA updates hourly; polling faster wastes quota
 _FALLBACK_CARBON = 200.0  # g/kWh — mid-range conservative default
 
 _cache: dict[str, tuple[datetime, list[dict]]] = {}
 
 
-async def get_carbon_forecast(api_key: str, hours: int = 48) -> list[dict] | None:
+async def get_carbon_forecast(
+    api_key: str, hours: int = 48, ba_code: str = "BPAT"
+) -> list[dict] | None:
     """
-    Return hourly carbon intensity for the BPA/BPAT region over the next `hours` slots.
+    Return hourly carbon intensity for the given balancing authority over the next `hours` slots.
 
     Uses same-time-yesterday for future hours (EIA has no day-ahead carbon forecast).
     Returns None if api_key is empty or the API call fails — caller should fall back
@@ -53,7 +55,8 @@ async def get_carbon_forecast(api_key: str, hours: int = 48) -> list[dict] | Non
         return None
 
     now = datetime.now(UTC)
-    cached = _cache.get("eia_bpat")
+    cache_key = f"eia_{ba_code}"
+    cached = _cache.get(cache_key)
     if cached:
         cached_at, result = cached
         if (now - cached_at).total_seconds() < CACHE_TTL_SECONDS:
@@ -61,23 +64,23 @@ async def get_carbon_forecast(api_key: str, hours: int = 48) -> list[dict] | Non
 
     try:
         start = now - timedelta(hours=49)
-        raw = await _fetch_eia_raw(api_key, start, now)
+        raw = await _fetch_eia_raw(api_key, ba_code, start, now)
         rows = raw.get("response", {}).get("data", [])
         intensity_by_hour = _compute_intensity_by_hour(rows)
         result = _build_forecast(intensity_by_hour, now, hours)
     except Exception:
         return None
 
-    _cache["eia_bpat"] = (now, result)
+    _cache[cache_key] = (now, result)
     return result
 
 
-async def _fetch_eia_raw(api_key: str, start: datetime, end: datetime) -> dict:
+async def _fetch_eia_raw(api_key: str, ba_code: str, start: datetime, end: datetime) -> dict:
     params = {
         "api_key": api_key,
         "frequency": "hourly",
         "data[]": "value",
-        "facets[respondent][]": "BPAT",
+        "facets[respondent][]": ba_code,
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "length": 350,  # 49 hours × 7 fuel types = 343 rows max

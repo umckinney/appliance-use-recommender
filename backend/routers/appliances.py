@@ -1,11 +1,13 @@
 """POST /appliances — add or update an appliance for the authenticated user."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.deps import get_api_key
 from backend.integrations import energystar
+from backend.limiter import limiter
 from backend.models import Appliance, User
 from backend.schemas import APPLIANCE_PRESETS, ApplianceIn, ApplianceOut, ModelSearchResult
 
@@ -21,7 +23,7 @@ async def _get_user(api_key: str, db: AsyncSession) -> User:
 
 
 @router.get("", response_model=list[ApplianceOut])
-async def list_appliances(api_key: str, db: AsyncSession = Depends(get_db)):
+async def list_appliances(api_key: str = Depends(get_api_key), db: AsyncSession = Depends(get_db)):
     user = await _get_user(api_key, db)
     result = await db.execute(select(Appliance).where(Appliance.user_id == user.id))
     return result.scalars().all()
@@ -30,7 +32,7 @@ async def list_appliances(api_key: str, db: AsyncSession = Depends(get_db)):
 @router.post("", response_model=ApplianceOut, status_code=201)
 async def add_appliance(
     req: ApplianceIn,
-    api_key: str,
+    api_key: str = Depends(get_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     user = await _get_user(api_key, db)
@@ -66,7 +68,7 @@ async def add_appliance(
 @router.delete("/{slug}", status_code=204)
 async def delete_appliance(
     slug: str,
-    api_key: str,
+    api_key: str = Depends(get_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     user = await _get_user(api_key, db)
@@ -81,7 +83,8 @@ async def delete_appliance(
 
 
 @router.get("/brands")
-async def list_brands(category: str) -> list[str]:
+@limiter.limit("30/hour")
+async def list_brands(request: Request, category: str) -> list[str]:
     """Return sorted unique brand names for a category. No auth required.
 
     category: one of dishwasher | washer | dryer

@@ -24,10 +24,18 @@ class ApplianceOut(ApplianceIn):
 
 
 class OnboardRequest(BaseModel):
-    name: str | None = None
-    email: str | None = None
-    address: str
-    utility_id: str
+    name: str | None = Field(None, max_length=100)
+    email: str | None = Field(None, max_length=255)
+    address: str = Field(..., max_length=500)
+    postal_code: str | None = Field(
+        None, max_length=20
+    )  # extracted by frontend; used as geocode fallback
+    utility_id: str = Field(..., max_length=100)
+    # Tier 2 utility metadata (populated from /utilities/search for eia_* utility_ids)
+    utility_name: str | None = Field(None, max_length=256)
+    utility_eia_id: int | None = None
+    utility_rate_avg: float | None = None
+    utility_tier: int | None = None
     rate_plan: str = "tou_residential"
     net_metering: bool = False
     has_solar: bool = False
@@ -43,6 +51,8 @@ class OnboardRequest(BaseModel):
 class OnboardResponse(BaseModel):
     api_key: str
     message: str
+    location_precise: bool = True  # False when ZIP centroid was used as fallback
+    location_warning: str | None = None  # human-readable explanation of fallback
 
 
 class RecommendWindow(BaseModel):
@@ -66,6 +76,16 @@ class RecommendResponse(BaseModel):
     carbon_now_kg: float
     carbon_best_kg: float
     data_sources: list[str]
+
+
+class AllRecommendResponse(BaseModel):
+    text: str
+    best_shared_start: str
+    per_appliance: list[RecommendResponse]
+
+
+class PreferencesUpdate(BaseModel):
+    optimization_weight: float = Field(..., ge=0.0, le=1.0)
 
 
 class ModelSearchResult(BaseModel):
@@ -97,6 +117,37 @@ class ForecastResponse(BaseModel):
     hours: list[ForecastHour]  # 24h ahead
     best_window_start: str
     utility_id: str
+
+
+class UtilitySearchResult(BaseModel):
+    eia_id: int
+    utility_name: str
+    state: str | None
+    ownership_type: str | None
+    residential_rate_avg: float | None
+    source_year: int | None
+    is_primary: bool
+    utility_id: str  # "eia_{eia_id}" — use as utility_id when onboarding
+
+
+class UtilitySearchResponse(BaseModel):
+    zipcode: str
+    utilities: list[UtilitySearchResult]
+    warning: str | None  # Texas retail choice / CA CCA advisory
+
+
+class DataSourceInfo(BaseModel):
+    source: str
+    tier: int | None = None  # 1 = YAML/URDB TOU, 2 = flat CSV avg
+    detail: str | None = None
+    freshness: str | None = None  # ISO8601 timestamp of last update
+
+
+class DataSourcesResponse(BaseModel):
+    utility: DataSourceInfo
+    carbon: DataSourceInfo
+    solar: DataSourceInfo
+    rates: DataSourceInfo
 
 
 # Common presets shown during onboarding

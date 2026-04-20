@@ -28,6 +28,15 @@ def load_utility(utility_id: str) -> dict:
     return _rate_cache[utility_id]
 
 
+def get_ba_code(utility_id: str) -> str | None:
+    """Return the EIA balancing authority code for a utility, or None if not mapped."""
+    try:
+        cfg = load_utility(utility_id)
+    except ValueError:
+        return None
+    return cfg.get("balancing_authority") or None
+
+
 def list_utilities() -> list[dict]:
     """Return a list of all supported utilities (id + name)."""
     results = []
@@ -40,12 +49,22 @@ def list_utilities() -> list[dict]:
     return results
 
 
-def get_rate(utility_id: str, local_dt: datetime) -> tuple[float, str]:
+def get_rate(
+    utility_id: str, local_dt: datetime, flat_rate: float | None = None
+) -> tuple[float, str]:
     """
     Return (rate_usd_kwh, period_name) for a local datetime.
 
+    For Tier 1 utilities (YAML-based), resolves TOU schedule.
+    For Tier 2 utilities (utility_id starts with "eia_"), uses flat_rate as a constant
+    off-peak rate — callers must pass the stored utility_rate_avg.
+
     Period name is one of: 'off_peak', 'mid_peak', 'peak'.
     """
+    if utility_id and utility_id.startswith("eia_"):
+        rate = flat_rate if flat_rate is not None else 0.12  # 12¢/kWh fallback
+        return rate, "off_peak"
+
     cfg = load_utility(utility_id)
     schedules = cfg["schedules"]
     rates = cfg["rates"]
@@ -71,10 +90,13 @@ def get_rate(utility_id: str, local_dt: datetime) -> tuple[float, str]:
     return rates[period], period
 
 
-def get_24h_schedule(utility_id: str, local_dt: datetime) -> list[dict]:
+def get_24h_schedule(
+    utility_id: str, local_dt: datetime, flat_rate: float | None = None
+) -> list[dict]:
     """
-    Return a 24-element list of hourly rate/period data starting at the
-    beginning of local_dt's day.
+    Return a 48-element list of hourly rate/period data starting at midnight of local_dt's day.
+
+    Pass flat_rate for Tier 2 (eia_*) utilities.
     """
     from datetime import timedelta
 
@@ -82,7 +104,7 @@ def get_24h_schedule(utility_id: str, local_dt: datetime) -> list[dict]:
     results = []
     for h in range(48):  # 48h forecast
         hour_dt = base + timedelta(hours=h)
-        rate, period = get_rate(utility_id, hour_dt)
+        rate, period = get_rate(utility_id, hour_dt, flat_rate=flat_rate)
         results.append(
             {
                 "hour_local": hour_dt.isoformat(),

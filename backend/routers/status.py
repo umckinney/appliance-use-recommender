@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.deps import get_api_key
 from backend.engine import optimizer, rates
 from backend.integrations import bpa, solaredge
 from backend.models import User
@@ -25,7 +26,7 @@ async def _get_user(api_key: str, db: AsyncSession) -> User:
 
 
 @router.get("", response_model=StatusResponse)
-async def status(api_key: str, db: AsyncSession = Depends(get_db)):
+async def status(api_key: str = Depends(get_api_key), db: AsyncSession = Depends(get_db)):
     user = await _get_user(api_key, db)
 
     grid_data = await bpa.get_carbon_intensity()
@@ -41,7 +42,7 @@ async def status(api_key: str, db: AsyncSession = Depends(get_db)):
 
     tz = zoneinfo.ZoneInfo(user.timezone or "America/Los_Angeles")
     local_now = datetime.now(UTC).astimezone(tz)
-    rate, period = rates.get_rate(user.utility_id, local_now)
+    rate, period = rates.get_rate(user.utility_id, local_now, flat_rate=user.utility_rate_avg)
 
     carbon_g_kwh = grid_data["carbon_g_kwh"]
 
