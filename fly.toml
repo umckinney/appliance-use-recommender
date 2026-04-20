@@ -26,6 +26,6 @@ primary_region = "sjc"  # San Jose — closest available to Pacific Northwest
     timeout = "5s"
 
 [[vm]]
-  memory = "256mb"
+  memory = "512mb"
   cpu_kind = "shared"
   cpus = 1

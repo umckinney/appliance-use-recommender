@@ -22,12 +22,25 @@ target_metadata = Base.metadata
 
 def _get_async_url() -> str:
     """Return the async database URL from app settings."""
+    from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
     from backend.config import settings
 
     url = settings.database_url
-    # Normalize bare postgres:// scheme (Fly.io / Heroku style) to asyncpg driver.
-    url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-    return url
+    # Normalize postgres:// or postgresql:// → postgresql+asyncpg://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    # Strip target_session_attrs — Fly.io Postgres URLs may include this parameter;
+    # asyncpg raises TargetServerAttributeNotMatched if the release-command machine
+    # connects to a standby instead of the primary.
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    params.pop("target_session_attrs", None)
+    new_query = urlencode({k: v[0] for k, v in params.items()})
+    return urlunparse(parsed._replace(query=new_query))
 
 
 # ---------------------------------------------------------------------------
