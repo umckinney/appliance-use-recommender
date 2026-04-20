@@ -16,7 +16,7 @@ from backend.engine.rates import get_ba_code
 from backend.integrations import bpa, eia, solaredge
 from backend.integrations import solar as solar_integration
 from backend.limiter import _api_key_or_ip, limiter
-from backend.models import Appliance, User
+from backend.models import Appliance, UrdbRate, User
 from backend.schemas import AllRecommendResponse, RecommendResponse, RecommendWindow
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
@@ -30,12 +30,23 @@ async def _get_user(api_key: str, db: AsyncSession) -> User:
     return user
 
 
-async def _fetch_shared_data(user: User) -> dict:
+async def _fetch_urdb_raw(user: User, db: AsyncSession) -> dict | None:
+    """Return the URDB raw_json for a URDB-tier user, else None."""
+    uid = user.utility_id or ""
+    if not uid.startswith("urdb_"):
+        return None
+    label = uid[len("urdb_") :]
+    result = await db.execute(select(UrdbRate).where(UrdbRate.urdb_label == label))
+    record = result.scalar_one_or_none()
+    return record.raw_json if record else None
+
+
+async def _fetch_shared_data(user: User, urdb_raw: dict | None = None) -> dict:
     """Fetch grid/weather/solar data shared across all appliance recommendations."""
     tz = zoneinfo.ZoneInfo(user.timezone or "America/Los_Angeles")
     local_now = datetime.now(UTC).astimezone(tz)
     rate_schedule = rates.get_24h_schedule(
-        user.utility_id, local_now, flat_rate=user.utility_rate_avg
+        user.utility_id, local_now, flat_rate=user.utility_rate_avg, urdb_raw=urdb_raw
     )
 
     grid_data = await bpa.get_carbon_intensity()
@@ -62,7 +73,11 @@ async def _fetch_shared_data(user: User) -> dict:
 
     uid = user.utility_id or ""
     nm_credit = 0.0
-    if not uid.startswith("eia_"):
+    if uid.startswith("urdb_"):
+        from backend.integrations.urdb import get_net_metering_credit
+
+        nm_credit = get_net_metering_credit(urdb_raw or {}) if user.net_metering else 0.0
+    elif not uid.startswith("eia_"):
         try:
             cfg = rates.load_utility(uid)
             nm_credit = cfg.get("net_metering_credit", 0.0)
@@ -164,13 +179,14 @@ async def recommend_all(
     db: AsyncSession = Depends(get_db),
 ):
     user = await _get_user(api_key, db)
+    urdb_raw = await _fetch_urdb_raw(user, db)
 
     result = await db.execute(select(Appliance).where(Appliance.user_id == user.id))
     appliances = result.scalars().all()
     if not appliances:
         raise HTTPException(status_code=404, detail="No appliances configured.")
 
-    shared = await _fetch_shared_data(user)
+    shared = await _fetch_shared_data(user, urdb_raw=urdb_raw)
     per_appliance = [
         _build_recommend_response(a, shared, user.optimization_weight) for a in appliances
     ]
@@ -202,6 +218,7 @@ async def recommend(
     db: AsyncSession = Depends(get_db),
 ):
     user = await _get_user(api_key, db)
+    urdb_raw = await _fetch_urdb_raw(user, db)
 
     result = await db.execute(
         select(Appliance).where(Appliance.user_id == user.id, Appliance.slug == appliance_slug)
@@ -214,5 +231,5 @@ async def recommend(
             f"Add it via POST /appliances or during onboarding.",
         )
 
-    shared = await _fetch_shared_data(user)
+    shared = await _fetch_shared_data(user, urdb_raw=urdb_raw)
     return _build_recommend_response(appliance, shared, user.optimization_weight)

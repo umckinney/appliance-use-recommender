@@ -14,7 +14,7 @@ from backend.engine import rates, solar
 from backend.engine.rates import get_ba_code
 from backend.integrations import bpa, eia, solaredge
 from backend.integrations import solar as solar_integration
-from backend.models import User
+from backend.models import UrdbRate, User
 from backend.schemas import ForecastHour, ForecastResponse
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -28,9 +28,20 @@ async def _get_user(api_key: str, db: AsyncSession) -> User:
     return user
 
 
+async def _fetch_urdb_raw(user: User, db: AsyncSession) -> dict | None:
+    uid = user.utility_id or ""
+    if not uid.startswith("urdb_"):
+        return None
+    label = uid[len("urdb_") :]
+    result = await db.execute(select(UrdbRate).where(UrdbRate.urdb_label == label))
+    record = result.scalar_one_or_none()
+    return record.raw_json if record else None
+
+
 @router.get("", response_model=ForecastResponse)
 async def forecast(api_key: str = Depends(get_api_key), db: AsyncSession = Depends(get_db)):
     user = await _get_user(api_key, db)
+    urdb_raw = await _fetch_urdb_raw(user, db)
 
     tz = zoneinfo.ZoneInfo(user.timezone or "America/Los_Angeles")
     local_now = datetime.now(UTC).astimezone(tz)
@@ -48,7 +59,7 @@ async def forecast(api_key: str = Depends(get_api_key), db: AsyncSession = Depen
         )
 
     rate_schedule = rates.get_24h_schedule(
-        user.utility_id, local_now, flat_rate=user.utility_rate_avg
+        user.utility_id, local_now, flat_rate=user.utility_rate_avg, urdb_raw=urdb_raw
     )
 
     ba_code = get_ba_code(user.utility_id) or "BPAT"
@@ -90,8 +101,6 @@ async def forecast(api_key: str = Depends(get_api_key), db: AsyncSession = Depen
             )
         )
 
-    # Best window = lowest combined score (cheapest + cleanest)
-    # For the forecast, just find the off-peak window with lowest rate
     best_start = min(hours, key=lambda x: x.rate_usd_kwh).hour_local
 
     return ForecastResponse(

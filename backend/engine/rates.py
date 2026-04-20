@@ -3,6 +3,11 @@ Utility rate loader and TOU schedule resolver.
 
 Reads YAML rate files from backend/data/utility_rates/ and computes
 the applicable rate and period for any local datetime.
+
+Three utility tiers are supported:
+  Tier 1 YAML   utility_id is a slug like 'seattle_city_light'
+  Tier 1 URDB   utility_id starts with 'urdb_'; caller passes urdb_raw
+  Tier 2 flat   utility_id starts with 'eia_'; caller passes flat_rate
 """
 
 from __future__ import annotations
@@ -50,20 +55,24 @@ def list_utilities() -> list[dict]:
 
 
 def get_rate(
-    utility_id: str, local_dt: datetime, flat_rate: float | None = None
+    utility_id: str,
+    local_dt: datetime,
+    flat_rate: float | None = None,
+    urdb_raw: dict | None = None,
 ) -> tuple[float, str]:
     """
     Return (rate_usd_kwh, period_name) for a local datetime.
-
-    For Tier 1 utilities (YAML-based), resolves TOU schedule.
-    For Tier 2 utilities (utility_id starts with "eia_"), uses flat_rate as a constant
-    off-peak rate — callers must pass the stored utility_rate_avg.
 
     Period name is one of: 'off_peak', 'mid_peak', 'peak'.
     """
     if utility_id and utility_id.startswith("eia_"):
         rate = flat_rate if flat_rate is not None else 0.12  # 12¢/kWh fallback
         return rate, "off_peak"
+
+    if utility_id and utility_id.startswith("urdb_"):
+        from backend.integrations.urdb import get_rate_from_raw
+
+        return get_rate_from_raw(urdb_raw or {}, local_dt)
 
     cfg = load_utility(utility_id)
     schedules = cfg["schedules"]
@@ -91,12 +100,15 @@ def get_rate(
 
 
 def get_24h_schedule(
-    utility_id: str, local_dt: datetime, flat_rate: float | None = None
+    utility_id: str,
+    local_dt: datetime,
+    flat_rate: float | None = None,
+    urdb_raw: dict | None = None,
 ) -> list[dict]:
     """
     Return a 48-element list of hourly rate/period data starting at midnight of local_dt's day.
 
-    Pass flat_rate for Tier 2 (eia_*) utilities.
+    Pass flat_rate for Tier 2 (eia_*) utilities, urdb_raw for Tier 1 URDB utilities.
     """
     from datetime import timedelta
 
@@ -104,7 +116,7 @@ def get_24h_schedule(
     results = []
     for h in range(48):  # 48h forecast
         hour_dt = base + timedelta(hours=h)
-        rate, period = get_rate(utility_id, hour_dt, flat_rate=flat_rate)
+        rate, period = get_rate(utility_id, hour_dt, flat_rate=flat_rate, urdb_raw=urdb_raw)
         results.append(
             {
                 "hour_local": hour_dt.isoformat(),

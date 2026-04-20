@@ -136,6 +136,22 @@ class UtilitySearchResponse(BaseModel):
     warning: str | None  # Texas retail choice / CA CCA advisory
 
 
+class UrdbTariff(BaseModel):
+    urdb_label: str
+    name: str | None
+    utility_id: str  # "urdb_{label}" — use as utility_id when onboarding
+    effective_date: str | None
+    is_active: bool
+    periods: dict[str, float]  # {"off_peak": 0.07, "peak": 0.17, ...}
+    net_metering_credit: float
+
+
+class TariffListResponse(BaseModel):
+    eia_id: int
+    utility_name: str | None
+    tariffs: list[UrdbTariff]
+
+
 class DataSourceInfo(BaseModel):
     source: str
     tier: int | None = None  # 1 = YAML/URDB TOU, 2 = flat CSV avg
