@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import {
   api,
   ApplianceOut,
+  DataSourcesResponse,
   ForecastHour,
   ForecastResponse,
   ModelSearchResult,
@@ -14,6 +15,8 @@ import {
 } from "@/lib/api";
 import Card from "@/components/Card";
 import Spinner from "@/components/Spinner";
+import { WeightSelector } from "@/components/wizard/StepPreferences";
+import QRCode from "qrcode";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -582,70 +585,226 @@ function AppliancesCard({
 // ─── Recovery panel (no API key state) ───────────────────────────────────────
 
 function KeyRecoveryPanel() {
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [foundKey, setFoundKey] = useState("");
-  const [notFound, setNotFound] = useState(false);
+  return (
+    <div className="mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+      <p className="text-sm font-medium text-gray-700 mb-2">Already have an account?</p>
+      <a href="/auth/login" className="text-sm text-blue-600 hover:underline">
+        Sign in with Google, GitHub, or magic link →
+      </a>
+    </div>
+  );
+}
 
-  async function handleLookup() {
-    if (!email.trim()) return;
-    setLoading(true);
-    setNotFound(false);
-    setFoundKey("");
+// ─── SiriSetupCard ────────────────────────────────────────────────────────────
+
+function QRCodeCanvas({ url }: { url: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (canvasRef.current) {
+      QRCode.toCanvas(canvasRef.current, url, { width: 160, margin: 1 });
+    }
+  }, [url]);
+  return <canvas ref={canvasRef} className="rounded-lg" />;
+}
+
+function SiriSetupCard({ apiKey, appliances }: { apiKey: string; appliances: ApplianceOut[] }) {
+  const [selectedSlug, setSelectedSlug] = useState(appliances[0]?.slug ?? "all");
+  const [showQR, setShowQR] = useState(false);
+
+  const options = appliances.length > 0
+    ? [...appliances.map((a) => ({ name: a.name, slug: a.slug })), { name: "All Appliances", slug: "all" }]
+    : [{ name: "All Appliances", slug: "all" }];
+
+  const shortcutDownloadUrl = api.getShortcutUrl(selectedSlug, apiKey);
+  const shortcutImportUrl = `shortcuts://import-workflow?url=${encodeURIComponent(shortcutDownloadUrl)}`;
+
+  return (
+    <Card>
+      <h2 className="text-sm font-semibold text-gray-700 mb-3">📱 Siri Setup</h2>
+
+      {/* Appliance selector */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {options.map((a) => (
+          <button
+            key={a.slug}
+            onClick={() => { setSelectedSlug(a.slug); setShowQR(false); }}
+            className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+              selectedSlug === a.slug
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-white text-blue-700 border-blue-300 hover:bg-blue-100"
+            }`}
+          >
+            {a.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <a
+          href={shortcutDownloadUrl}
+          download
+          className="text-xs bg-blue-600 text-white rounded-lg px-3 py-2 hover:bg-blue-700 transition-colors"
+        >
+          ↓ Download Shortcut
+        </a>
+        <a
+          href={shortcutImportUrl}
+          className="text-xs bg-white text-blue-700 border border-blue-300 rounded-lg px-3 py-2 hover:bg-blue-50 transition-colors"
+        >
+          Open in Shortcuts
+        </a>
+      </div>
+
+      <div className="mt-3">
+        <button
+          onClick={() => setShowQR((v) => !v)}
+          className="text-xs text-blue-600 underline underline-offset-2"
+        >
+          {showQR ? "Hide QR code" : "Show QR code"}
+        </button>
+        {showQR && (
+          <div className="mt-2">
+            <QRCodeCanvas url={shortcutImportUrl} />
+            <p className="text-xs text-gray-400 mt-1">
+              Keep this URL private — it contains your API key.
+            </p>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ─── PreferencesCard ──────────────────────────────────────────────────────────
+
+function PreferencesCard({ apiKey }: { apiKey: string }) {
+  const [weight, setWeight] = useState(0.5);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  async function handleChange(v: number) {
+    setWeight(v);
+    setSaved(false);
+    setSaveError("");
     try {
-      const res = await api.accountLookup(email.trim());
-      setFoundKey(res.api_key);
-    } catch {
-      setNotFound(true);
-    } finally {
-      setLoading(false);
+      await api.updatePreferences(apiKey, v);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
     }
   }
 
   return (
-    <div className="mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-      <p className="text-sm font-medium text-gray-700 mb-3">Recover your API key</p>
-      <div className="flex gap-2">
-        <input
-          type="email" value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleLookup()}
-          placeholder="your@email.com"
-          className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button
-          onClick={handleLookup} disabled={loading}
-          className="shrink-0 text-sm bg-blue-600 text-white rounded-lg px-4 py-1.5 hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          {loading ? "…" : "Find my key"}
-        </button>
-      </div>
-      {notFound && <p className="text-xs text-red-500 mt-2">No account found for that email.</p>}
-      {foundKey && (
-        <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
-          <p className="text-xs text-green-700 font-medium mb-1">Found your account!</p>
-          <code className="text-xs font-mono text-gray-800 break-all">{foundKey}</code>
-          <div className="mt-2">
-            <a
-              href={`/dashboard?api_key=${encodeURIComponent(foundKey)}`}
-              className="text-xs text-blue-600 hover:underline font-medium"
-            >
-              Go to dashboard →
-            </a>
-          </div>
+    <Card>
+      <h2 className="text-sm font-semibold text-gray-700 mb-3">Optimise for</h2>
+      <WeightSelector value={weight} onChange={handleChange} />
+      {saved && <p className="text-xs text-green-600 mt-2">Saved</p>}
+      {saveError && <p className="text-xs text-red-500 mt-2">{saveError}</p>}
+    </Card>
+  );
+}
+
+// ─── DataSourcesPanel ────────────────────────────────────────────────────────
+
+function freshnessColor(isoTs: string | null): string {
+  if (!isoTs) return "text-gray-400";
+  const ageDays = (Date.now() - new Date(isoTs).getTime()) / 86_400_000;
+  if (ageDays < 7) return "text-green-600";
+  if (ageDays < 30) return "text-yellow-600";
+  return "text-red-500";
+}
+
+function tierBadge(tier: number | null) {
+  if (tier === 1) return <span className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">Tier 1 — TOU</span>;
+  if (tier === 2) return <span className="text-xs font-medium text-yellow-700 bg-yellow-50 border border-yellow-200 rounded px-1.5 py-0.5">Tier 2 — flat avg</span>;
+  return null;
+}
+
+function DataSourcesPanel({ apiKey }: { apiKey: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<DataSourcesResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || data) return;
+    setLoading(true);
+    api.getDataSources(apiKey).then(setData).catch(() => {}).finally(() => setLoading(false));
+  }, [open, apiKey, data]);
+
+  return (
+    <Card>
+      <button
+        className="w-full flex items-center justify-between text-left"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="text-sm font-semibold text-gray-800">Data sources</span>
+        <span className="text-gray-400 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="mt-4">
+          {loading && <p className="text-xs text-gray-400">Loading…</p>}
+          {data && (
+            <dl className="space-y-3 text-sm">
+              {([
+                ["Utility / Rates", data.rates],
+                ["Carbon", data.carbon],
+                ["Solar", data.solar],
+              ] as [string, typeof data.rates][]).map(([label, info]) => (
+                <div key={label}>
+                  <dt className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">{label}</dt>
+                  <dd className="text-gray-800 flex flex-wrap items-center gap-1.5">
+                    {info.source}
+                    {tierBadge(info.tier)}
+                  </dd>
+                  {info.detail && <p className="text-xs text-gray-400 mt-0.5">{info.detail}</p>}
+                  {info.freshness && (
+                    <p className={`text-xs mt-0.5 ${freshnessColor(info.freshness)}`}>
+                      Last updated: {new Date(info.freshness).toLocaleDateString()}
+                    </p>
+                  )}
+                  {info.tier === 2 && (
+                    <p className="text-xs text-yellow-700 mt-0.5">
+                      Flat average rate — cost recommendations are simplified.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
 // ─── DashboardContent ─────────────────────────────────────────────────────────
 
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+async function fetchSession(): Promise<string | null> {
+  try {
+    const res = await fetch(`${BASE}/auth/me`, { credentials: "include" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.api_key ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function logout() {
+  await fetch(`${BASE}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => {});
+  window.location.href = "/auth/login";
+}
+
 function DashboardContent() {
   const params = useSearchParams();
   const router = useRouter();
-  const apiKey = params.get("api_key") ?? "";
+  const urlKey = params.get("api_key") ?? "";
 
+  const [apiKey, setApiKey] = useState(urlKey);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [appliances, setAppliances] = useState<ApplianceOut[]>([]);
@@ -653,23 +812,43 @@ function DashboardContent() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!apiKey) { setLoading(false); return; }
+    if (urlKey) {
+      setApiKey(urlKey);
+      return;
+    }
+    // No key in URL — check session cookie
+    fetchSession().then((sessionKey) => {
+      if (sessionKey) {
+        setApiKey(sessionKey);
+      } else {
+        setLoading(false);
+      }
+    });
+  }, [urlKey]);
+
+  useEffect(() => {
+    if (!apiKey) return;
     Promise.all([api.status(apiKey), api.forecast(apiKey), api.listAppliances(apiKey)])
       .then(([s, f, a]) => { setStatus(s); setForecast(f); setAppliances(a); })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [apiKey]);
 
-  if (!apiKey) {
+  if (!apiKey && !loading) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500 mb-2">No API key found.</p>
-        <button
-          onClick={() => router.push("/onboard")}
-          className="text-blue-600 hover:underline text-sm"
-        >
-          Complete onboarding →
-        </button>
+        <p className="text-gray-500 mb-2">No account found.</p>
+        <div className="flex flex-col items-center gap-2 mt-3">
+          <a href="/auth/login" className="text-blue-600 hover:underline text-sm">
+            Sign in →
+          </a>
+          <button
+            onClick={() => router.push("/onboard")}
+            className="text-gray-500 hover:underline text-sm"
+          >
+            Create account →
+          </button>
+        </div>
         <KeyRecoveryPanel />
       </div>
     );
@@ -773,6 +952,15 @@ function DashboardContent() {
         onAppliancesChange={setAppliances}
       />
 
+      {/* Siri shortcut setup */}
+      <SiriSetupCard apiKey={apiKey} appliances={appliances} />
+
+      {/* Optimization preference */}
+      <PreferencesCard apiKey={apiKey} />
+
+      {/* Data provenance */}
+      <DataSourcesPanel apiKey={apiKey} />
+
       {/* API key reminder */}
       <Card className="bg-gray-50">
         <p className="text-xs text-gray-500">
@@ -795,7 +983,12 @@ export default function DashboardPage() {
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-2xl font-bold text-gray-900">⚡ FlowShift</h1>
-          <a href="/onboard" className="text-sm text-blue-600 hover:underline">Update settings</a>
+          <div className="flex items-center gap-4">
+            <a href="/onboard" className="text-sm text-blue-600 hover:underline">Update settings</a>
+            <button onClick={logout} className="text-sm text-gray-500 hover:text-gray-700 hover:underline">
+              Sign out
+            </button>
+          </div>
         </div>
         <Suspense fallback={<div className="text-center py-20 text-gray-400 text-sm">Loading…</div>}>
           <DashboardContent />

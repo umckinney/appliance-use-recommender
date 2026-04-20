@@ -99,10 +99,7 @@ async def search_models(category: str, query: str, limit: int = 20) -> list[dict
     q = query.strip().lower()
     if not q:
         return records[:limit]
-    matches = [
-        r for r in records
-        if q in r["brand"].lower() or q in r["model"].lower()
-    ]
+    matches = [r for r in records if q in r["brand"].lower() or q in r["model"].lower()]
     return matches[:limit]
 
 
@@ -141,9 +138,8 @@ def _normalize(category: str, rows: list[dict], annual_cycles: int) -> list[dict
 
             cycle_minutes: int | None = None
             if category == "dryer":
-                raw_min = (
-                    row.get("estimated_energy_test_cycle_time_min")
-                    or row.get("test_cycle_time_minutes")
+                raw_min = row.get("estimated_energy_test_cycle_time_min") or row.get(
+                    "test_cycle_time_minutes"
                 )
                 if raw_min is not None:
                     cycle_minutes = int(float(raw_min))
