@@ -763,3 +763,129 @@ class TestBalancingAuthority:
         eia_mock.assert_called_once()
         _, kwargs = eia_mock.call_args
         assert kwargs.get("ba_code") == "BPAT"
+
+
+# ---------------------------------------------------------------------------
+# /auth — magic link + session
+# ---------------------------------------------------------------------------
+
+
+class TestAuth:
+    """Helper shared by tests that need to insert a magic link token directly."""
+
+    async def _insert_token(self, db_factory, email: str, raw_token: str) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy import select
+
+        from backend.models import MagicLinkToken, User
+        from backend.routers.auth import _hash_token
+
+        async with db_factory() as db:
+            result = await db.execute(select(User).where(User.email == email))
+            user = result.scalar_one()
+            db.add(
+                MagicLinkToken(
+                    user_id=user.id,
+                    token_hash=_hash_token(raw_token),
+                    expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=15),
+                )
+            )
+            await db.commit()
+
+    async def _onboard(self, client, email: str) -> None:
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
+        ):
+            await client.post(
+                "/onboard",
+                json={"email": email, "address": "1 Main St", "utility_id": "seattle_city_light"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_magic_link_send_enumeration_safe(self, client):
+        """Always returns 200 regardless of whether email exists."""
+        resp = await client.post(
+            "/auth/magic-link/send",
+            json={"email": "nobody@example.com"},
+        )
+        assert resp.status_code == 200
+        assert "sign-in link" in resp.json()["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_magic_link_verify_invalid_token(self, client):
+        resp = await client.get("/auth/magic-link/verify?token=badtoken")
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_magic_link_full_flow(self, client, db_factory):
+        """Create a user, issue a magic link token, verify it, check session cookie."""
+        await self._onboard(client, "magic@example.com")
+        await self._insert_token(db_factory, "magic@example.com", "test-magic-token-abc123")
+
+        resp = await client.get(
+            "/auth/magic-link/verify?token=test-magic-token-abc123",
+            follow_redirects=False,
+        )
+        assert resp.status_code in (302, 307)
+        assert "dashboard" in resp.headers["location"]
+        assert resp.cookies.get("fs_session") is not None
+
+    @pytest.mark.asyncio
+    async def test_magic_link_token_single_use(self, client, db_factory):
+        """Verifying the same token twice should fail on the second attempt."""
+        await self._onboard(client, "once@example.com")
+        await self._insert_token(db_factory, "once@example.com", "single-use-token-xyz")
+
+        r1 = await client.get("/auth/magic-link/verify?token=single-use-token-xyz", follow_redirects=False)
+        assert r1.status_code in (302, 307)
+
+        r2 = await client.get("/auth/magic-link/verify?token=single-use-token-xyz", follow_redirects=False)
+        assert r2.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_me_unauthenticated(self, client):
+        resp = await client.get("/auth/me")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_me_with_session(self, client, db_factory):
+        """After magic link verify, /auth/me should return user info."""
+        await self._onboard(client, "me@example.com")
+        await self._insert_token(db_factory, "me@example.com", "me-test-token")
+
+        verify = await client.get("/auth/magic-link/verify?token=me-test-token", follow_redirects=False)
+        assert verify.status_code in (302, 307)
+
+        me = await client.get("/auth/me")
+        assert me.status_code == 200
+        data = me.json()
+        assert data["email"] == "me@example.com"
+        assert "api_key" in data
+
+    @pytest.mark.asyncio
+    async def test_logout_clears_session(self, client, db_factory):
+        """After logout, /auth/me should return 401."""
+        await self._onboard(client, "logout@example.com")
+        await self._insert_token(db_factory, "logout@example.com", "logout-test-token")
+
+        await client.get("/auth/magic-link/verify?token=logout-test-token", follow_redirects=False)
+        assert (await client.get("/auth/me")).status_code == 200
+
+        await client.post("/auth/logout")
+        assert (await client.get("/auth/me")).status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_oauth_login_unknown_provider(self, client):
+        resp = await client.get("/auth/unknown-provider/login")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_oauth_callback_state_mismatch(self, client):
+        resp = await client.get(
+            "/auth/google/callback?code=abc&state=wrong",
+            follow_redirects=False,
+        )
+        assert resp.status_code == 400

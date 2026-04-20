@@ -81,8 +81,10 @@ Visit `http://localhost:3000` to onboard and get your API key.
 DATABASE_URL=sqlite+aiosqlite:///./flowshift.db   # SQLite default; override for Postgres
 EIA_API_KEY=your_eia_key
 SECRET_KEY=change-me-in-production
-SOLAREDGE_SITE_ID=                                # optional
-SOLAREDGE_API_KEY=                                # optional
+FRONTEND_URL=http://localhost:3000                # used to build OAuth redirect and magic link URLs
+CORS_ORIGINS=http://localhost:3000               # see CORS section below
+SOLAREDGE_SITE_ID=                               # optional
+SOLAREDGE_API_KEY=                               # optional
 ```
 
 **Frontend (`.env.local`)**
@@ -90,6 +92,30 @@ SOLAREDGE_API_KEY=                                # optional
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000         # set to your Fly.io URL in production
 ```
+
+## CORS
+
+FlowShift uses `Access-Control-Allow-Credentials: true` so the browser can send
+session cookies to the backend. The [browser spec](https://fetch.spec.whatwg.org/)
+forbids wildcards when credentials are enabled, so you must list allowed origins
+explicitly via the `CORS_ORIGINS` environment variable.
+
+**Local development** — the default (`http://localhost:3000`) works out of the box.
+
+**Production** — set `CORS_ORIGINS` to match your frontend URL(s). Multiple origins
+are comma-separated:
+
+```
+CORS_ORIGINS=https://flowshift.app,https://www.flowshift.app
+```
+
+**Self-hosted deployments** — set `CORS_ORIGINS` to whatever URL your frontend is
+served from, e.g. `https://flowshift.example.com`. There is no limit on the number
+of origins you can list.
+
+> **Note:** CORS is a browser security mechanism — it does not apply to Siri
+> Shortcuts or direct API calls (`curl`, scripts, etc.). The `?api_key=` token
+> flow is unaffected by this setting.
 
 ## Deployment
 
@@ -107,10 +133,18 @@ fly postgres create --name flowshift-db --region sea
 fly postgres attach flowshift-db
 fly secrets set \
   EIA_API_KEY=your_eia_key \
-  SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+  SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))") \
+  FRONTEND_URL=https://your-vercel-app.vercel.app \
+  CORS_ORIGINS=https://your-vercel-app.vercel.app
 
 # Optional — SolarEdge
 fly secrets set SOLAREDGE_SITE_ID=your_site_id SOLAREDGE_API_KEY=your_api_key
+
+# Optional — OAuth (Google, GitHub, Apple) and magic link email
+fly secrets set \
+  GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+  GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... \
+  RESEND_API_KEY=...
 
 # 4. Deploy
 fly deploy

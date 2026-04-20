@@ -31,8 +31,12 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     magic_link_from_email: str = "noreply@flowshift.app"
 
+    # CORS — comma-separated list of allowed origins for browser requests.
+    # Must be explicit (no wildcard) when allow_credentials=True.
+    # Self-hosters: set to the URL of your frontend, e.g. https://flowshift.example.com
+    cors_origins: list[str] = ["http://localhost:3000"]
+
     # Session config
-    session_secret_key: str = "change-me-in-production"  # for itsdangerous signing
     session_max_age_days: int = 30
     frontend_url: str = "http://localhost:3000"  # used to build magic link redirect URLs
 

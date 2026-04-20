@@ -39,6 +39,17 @@ async def db_session(db_engine):
 
 
 @pytest_asyncio.fixture
+async def db_factory(db_engine):
+    """Returns an async session factory connected to the test DB.
+
+    Use this in tests that need to insert records directly (e.g. auth tests
+    that create MagicLinkTokens) while sharing the same in-memory DB as the
+    test client.
+    """
+    return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
 async def client(db_engine):
     """AsyncClient with the test database injected."""
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
