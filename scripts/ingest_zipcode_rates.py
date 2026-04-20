@@ -198,11 +198,11 @@ async def _ingest_source(
 
         # Mark primary utility per ZIP (the one with highest EIA ID for determinism)
         await session.flush()
-        await session.execute(text("UPDATE zipcode_utility SET is_primary = 0"))
+        await session.execute(text("UPDATE zipcode_utility SET is_primary = false"))
         await session.execute(
             text(
                 """
-                UPDATE zipcode_utility SET is_primary = 1
+                UPDATE zipcode_utility SET is_primary = true
                 WHERE (zipcode, eia_id) IN (
                     SELECT zipcode, MAX(eia_id)
                     FROM zipcode_utility
