@@ -1,11 +1,12 @@
 """POST /onboard — create or update a user profile."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
-from backend.integrations.geocoding import geocode
+from backend.integrations.geocoding import geocode_with_fallback
+from backend.limiter import limiter
 from backend.models import Appliance, User
 from backend.schemas import APPLIANCE_PRESETS, OnboardRequest, OnboardResponse
 
@@ -13,11 +14,16 @@ router = APIRouter(prefix="/onboard", tags=["onboard"])
 
 
 @router.post("", response_model=OnboardResponse)
-async def onboard(req: OnboardRequest, db: AsyncSession = Depends(get_db)):
-    # Geocode the address
-    geo = await geocode(req.address)
-    if not geo:
-        raise HTTPException(status_code=422, detail=f"Could not geocode address: {req.address!r}")
+@limiter.limit("5/hour")
+async def onboard(request: Request, req: OnboardRequest, db: AsyncSession = Depends(get_db)):
+    # Geocode — ZIP centroid used as fallback if Nominatim is unavailable
+    geo = await geocode_with_fallback(req.address, postal_code=req.postal_code or "", session=db)
+    if geo["lat"] is None:
+        raise HTTPException(
+            status_code=422,
+            detail=geo.get("fallback_reason")
+            or f"Could not determine location for: {req.address!r}",
+        )
 
     # Check for existing user by email
     user = None
@@ -35,6 +41,10 @@ async def onboard(req: OnboardRequest, db: AsyncSession = Depends(get_db)):
     user.lat = geo["lat"]
     user.lon = geo["lon"]
     user.utility_id = req.utility_id
+    user.utility_name = req.utility_name
+    user.utility_eia_id = req.utility_eia_id
+    user.utility_rate_avg = req.utility_rate_avg
+    user.utility_tier = req.utility_tier or (2 if req.utility_id.startswith("eia_") else 1)
     user.rate_plan = req.rate_plan
     user.net_metering = req.net_metering
     user.has_solar = req.has_solar
@@ -71,10 +81,13 @@ async def onboard(req: OnboardRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(user)
 
+    location_precise = geo.get("precise", True)
     return OnboardResponse(
         api_key=user.api_key,
         message=(
             f"Welcome{' ' + user.name if user.name else ''}! "
             f"FlowShift is ready. Use your API key to query recommendations."
         ),
+        location_precise=location_precise,
+        location_warning=geo.get("fallback_reason") if not location_precise else None,
     )

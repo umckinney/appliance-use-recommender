@@ -12,85 +12,19 @@ import Spinner from "@/components/Spinner";
 import StepDone from "@/components/wizard/StepDone";
 
 function RecoveryPanel() {
-  const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [foundKey, setFoundKey] = useState("");
-  const [notFound, setNotFound] = useState(false);
-
-  async function handleLookup() {
-    if (!email.trim()) return;
-    setLoading(true);
-    setNotFound(false);
-    setFoundKey("");
-    try {
-      const res = await api.accountLookup(email.trim());
-      setFoundKey(res.api_key);
-    } catch {
-      setNotFound(true);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <div className="text-center text-sm text-gray-500 mb-6 space-y-1">
       <p>
-        Already have an API key?{" "}
-        <Link
-          href="/dashboard"
-          className="text-blue-600 hover:underline font-medium"
-        >
-          Go to dashboard →
+        Already have an account?{" "}
+        <Link href="/auth/login" className="text-blue-600 hover:underline font-medium">
+          Sign in →
         </Link>
       </p>
       <p>
-        <button
-          onClick={() => { setOpen((o) => !o); setFoundKey(""); setNotFound(false); }}
-          className="text-blue-600 hover:underline font-medium"
-        >
-          Registered before? Recover your key →
-        </button>
+        <Link href="/dashboard" className="text-blue-600 hover:underline font-medium">
+          Go to dashboard →
+        </Link>
       </p>
-      {open && (
-        <div className="mt-3 bg-white border border-gray-200 rounded-xl p-4 text-left shadow-sm">
-          <p className="text-xs font-medium text-gray-600 mb-2">Enter your registered email:</p>
-          <div className="flex gap-2">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleLookup()}
-              placeholder="you@example.com"
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              onClick={handleLookup}
-              disabled={loading}
-              className="shrink-0 text-sm bg-blue-600 text-white rounded-lg px-4 py-1.5 hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {loading ? "…" : "Find my key"}
-            </button>
-          </div>
-          {notFound && (
-            <p className="text-xs text-red-500 mt-2">No account found for that email.</p>
-          )}
-          {foundKey && (
-            <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
-              <p className="text-xs text-green-700 font-medium mb-1">Found your account!</p>
-              <code className="text-xs font-mono text-gray-800 break-all">{foundKey}</code>
-              <div className="mt-2">
-                <Link
-                  href={`/dashboard?api_key=${encodeURIComponent(foundKey)}`}
-                  className="text-xs text-blue-600 hover:underline font-medium"
-                >
-                  Go to dashboard →
-                </Link>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -103,6 +37,7 @@ type WizardState = OnboardPayload & {
 
 const DEFAULT_STATE: WizardState = {
   address: "",
+  postal_code: "",
   utility_id: "seattle_city_light",
   has_solar: false,
   net_metering: false,
@@ -152,7 +87,15 @@ export default function OnboardPage() {
 
         {step === 0 && (
           <StepLocation
-            initial={{ address: state.address, utility_id: state.utility_id }}
+            initial={{
+              address: state.address,
+              postal_code: state.postal_code,
+              utility_id: state.utility_id,
+              utility_name: state.utility_name,
+              utility_eia_id: state.utility_eia_id,
+              utility_rate_avg: state.utility_rate_avg,
+              utility_tier: state.utility_tier,
+            }}
             onNext={(d) => {
               merge(d);
               setStep(1);
