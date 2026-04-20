@@ -26,7 +26,12 @@ export type OnboardPayload = {
   name?: string;
   email?: string;
   address: string;
+  postal_code?: string;
   utility_id: string;
+  utility_name?: string;
+  utility_eia_id?: number;
+  utility_rate_avg?: number;
+  utility_tier?: number;
   rate_plan?: string;
   net_metering?: boolean;
   has_solar?: boolean;
@@ -37,6 +42,37 @@ export type OnboardPayload = {
   solaredge_api_key?: string;
   optimization_weight?: number;
   appliances?: Pick<AppliancePreset, "name" | "slug" | "cycle_kwh" | "cycle_minutes">[];
+};
+
+export type UtilitySearchResult = {
+  eia_id: number;
+  utility_name: string;
+  state: string | null;
+  ownership_type: string | null;
+  residential_rate_avg: number | null;
+  source_year: number | null;
+  is_primary: boolean;
+  utility_id: string;
+};
+
+export type UtilitySearchResponse = {
+  zipcode: string;
+  utilities: UtilitySearchResult[];
+  warning: string | null;
+};
+
+export type DataSourceInfo = {
+  source: string;
+  tier: number | null;
+  detail: string | null;
+  freshness: string | null;
+};
+
+export type DataSourcesResponse = {
+  utility: DataSourceInfo;
+  carbon: DataSourceInfo;
+  solar: DataSourceInfo;
+  rates: DataSourceInfo;
 };
 
 export type OnboardResponse = {
@@ -89,6 +125,12 @@ export type RecommendResponse = {
   carbon_now_kg: number;
   carbon_best_kg: number;
   data_sources: string[];
+};
+
+export type AllRecommendResponse = {
+  text: string;
+  best_shared_start: string;
+  per_appliance: RecommendResponse[];
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -154,9 +196,26 @@ export const api = {
       `/recommend/${slug}?api_key=${encodeURIComponent(apiKey)}`
     ),
 
-  accountLookup: (email: string) =>
-    request<{ api_key: string }>("/account/lookup", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }),
+  recommendAll: (apiKey: string) =>
+    request<AllRecommendResponse>(
+      `/recommend/all?api_key=${encodeURIComponent(apiKey)}`
+    ),
+
+  getShortcutUrl: (slug: string, apiKey: string): string =>
+    `${BASE}/shortcuts/${encodeURIComponent(slug)}?api_key=${encodeURIComponent(apiKey)}`,
+
+  updatePreferences: (apiKey: string, optimizationWeight: number) =>
+    request<{ optimization_weight: number }>(
+      `/account/preferences?api_key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ optimization_weight: optimizationWeight }),
+      }
+    ),
+
+  searchUtilities: (zip: string) =>
+    request<UtilitySearchResponse>(`/utilities/search?zip=${encodeURIComponent(zip)}`),
+
+  getDataSources: (apiKey: string) =>
+    request<DataSourcesResponse>(`/data-sources?api_key=${encodeURIComponent(apiKey)}`),
 };

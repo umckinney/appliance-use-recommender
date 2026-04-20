@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import QRCode from "qrcode";
 import Card from "@/components/Card";
 import Button from "@/components/Button";
+import { api } from "@/lib/api";
 
 type Appliance = { name: string; slug: string };
 
@@ -13,16 +15,32 @@ type Props = {
   appliances?: Appliance[];
 };
 
-export default function StepDone({ apiKey, message, appliances = [] }: Props) {
-  const defaultSlug = appliances[0]?.slug ?? "dishwasher";
-  const defaultName = appliances[0]?.name ?? "dishwasher";
+const ALL_OPTION: Appliance = { name: "All Appliances", slug: "all" };
 
+function QRCodeDisplay({ url }: { url: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (canvasRef.current) {
+      QRCode.toCanvas(canvasRef.current, url, { width: 160, margin: 1 });
+    }
+  }, [url]);
+
+  return <canvas ref={canvasRef} className="rounded-lg" />;
+}
+
+export default function StepDone({ apiKey, message, appliances = [] }: Props) {
+  const options: Appliance[] = appliances.length > 1
+    ? [...appliances, ALL_OPTION]
+    : appliances;
+
+  const defaultSlug = appliances[0]?.slug ?? "dishwasher";
+  const [selectedSlug, setSelectedSlug] = useState(defaultSlug);
   const [copied, setCopied] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
-  const [selectedSlug, setSelectedSlug] = useState(defaultSlug);
+  const [showQR, setShowQR] = useState(false);
 
-  const selectedName =
-    appliances.find((a) => a.slug === selectedSlug)?.name ?? selectedSlug;
+  const selectedName = options.find((a) => a.slug === selectedSlug)?.name ?? selectedSlug;
 
   async function copyKey() {
     await navigator.clipboard.writeText(apiKey);
@@ -38,10 +56,15 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
       ? "http://localhost:8000"
       : `http://${host}:8000`;
   }
+
   const baseUrl = getApiBase();
   const isLocalhost = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
   const isCloud = !!process.env.NEXT_PUBLIC_API_URL && !isLocalhost;
-  const siriUrl = `${baseUrl}/recommend/${selectedSlug}?api_key=${apiKey}`;
+
+  const recommendEndpoint = selectedSlug === "all" ? "recommend/all" : `recommend/${selectedSlug}`;
+  const siriUrl = `${baseUrl}/${recommendEndpoint}?api_key=${apiKey}`;
+  const shortcutDownloadUrl = api.getShortcutUrl(selectedSlug, apiKey);
+  const shortcutImportUrl = `shortcuts://import-workflow?url=${encodeURIComponent(shortcutDownloadUrl)}`;
 
   async function copySiriUrl() {
     await navigator.clipboard.writeText(siriUrl);
@@ -84,12 +107,12 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
         </h3>
 
         {/* Appliance selector */}
-        {appliances.length > 1 && (
+        {options.length > 1 && (
           <div className="flex flex-wrap gap-2 mb-3">
-            {appliances.map((a) => (
+            {options.map((a) => (
               <button
                 key={a.slug}
-                onClick={() => setSelectedSlug(a.slug)}
+                onClick={() => { setSelectedSlug(a.slug); setShowQR(false); }}
                 className={`text-xs px-3 py-1 rounded-full border transition-colors ${
                   selectedSlug === a.slug
                     ? "bg-blue-600 text-white border-blue-600"
@@ -102,37 +125,84 @@ export default function StepDone({ apiKey, message, appliances = [] }: Props) {
           </div>
         )}
 
-        <ol className="text-sm text-blue-700 space-y-1.5 list-decimal list-inside mb-3">
-          <li>Open the <strong>Shortcuts</strong> app</li>
-          <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;URL&quot; → tap <strong>Get contents of URL</strong></li>
-          <li>
-            Paste this URL into the URL field:
-            <div className="flex items-start gap-2 mt-1">
-              <code className="flex-1 text-xs bg-white rounded-lg p-2 break-all text-gray-700">
-                {siriUrl}
-              </code>
-              <button
-                onClick={copySiriUrl}
-                className="shrink-0 text-xs text-gray-700 bg-white border border-gray-300 rounded-lg px-2 py-1.5 hover:bg-gray-50 transition-colors"
+        {/* Quick setup: Download Shortcut */}
+        {isCloud && (
+          <div className="mb-4">
+            <p className="text-xs text-blue-700 font-medium mb-2">Quick setup</p>
+            <div className="flex gap-2">
+              <a
+                href={shortcutDownloadUrl}
+                download
+                className="text-xs bg-blue-600 text-white rounded-lg px-3 py-2 hover:bg-blue-700 transition-colors"
               >
-                {copiedUrl ? "✓" : "Copy"}
-              </button>
+                ↓ Download Shortcut
+              </a>
+              <a
+                href={shortcutImportUrl}
+                className="text-xs bg-white text-blue-700 border border-blue-300 rounded-lg px-3 py-2 hover:bg-blue-50 transition-colors"
+              >
+                Open in Shortcuts
+              </a>
             </div>
-            {isLocalhost && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">
-                ⚠️ This URL won&apos;t work on your iPhone. Visit this page at{" "}
-                <strong>http://&lt;your-mac-ip&gt;:3000</strong> to get a usable URL.
-                Find your Mac&apos;s IP in{" "}
-                <strong>System Settings → Wi-Fi → Details</strong>.
-              </p>
-            )}
-          </li>
-          <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;dictionary&quot; → tap <strong>Get Dictionary from Input</strong></li>
-          <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;dictionary&quot; → tap <strong>Get Dictionary Value</strong> → set Key to <strong>text</strong></li>
-          <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;speak&quot; → tap <strong>Speak Text</strong></li>
-          <li>Tap the shortcut title at the top → rename to <strong>Should I run the {selectedName}?</strong></li>
-          <li>Say &quot;Hey Siri, should I run the {selectedName}?&quot;</li>
-        </ol>
+
+            {/* QR code (collapsible) */}
+            <div className="mt-3">
+              <button
+                onClick={() => setShowQR((v) => !v)}
+                className="text-xs text-blue-600 underline underline-offset-2"
+              >
+                {showQR ? "Hide QR code" : "Show QR code (scan on iPhone)"}
+              </button>
+              {showQR && (
+                <div className="mt-2">
+                  <QRCodeDisplay url={shortcutImportUrl} />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Keep this URL private — it contains your API key.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Manual setup steps */}
+        <details className={isCloud ? "mt-2" : undefined}>
+          {isCloud && (
+            <summary className="text-xs text-blue-600 cursor-pointer mb-2">
+              Manual setup (7 steps)
+            </summary>
+          )}
+          <ol className="text-sm text-blue-700 space-y-1.5 list-decimal list-inside mb-3">
+            <li>Open the <strong>Shortcuts</strong> app</li>
+            <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;URL&quot; → tap <strong>Get contents of URL</strong></li>
+            <li>
+              Paste this URL into the URL field:
+              <div className="flex items-start gap-2 mt-1">
+                <code className="flex-1 text-xs bg-white rounded-lg p-2 break-all text-gray-700">
+                  {siriUrl}
+                </code>
+                <button
+                  onClick={copySiriUrl}
+                  className="shrink-0 text-xs text-gray-700 bg-white border border-gray-300 rounded-lg px-2 py-1.5 hover:bg-gray-50 transition-colors"
+                >
+                  {copiedUrl ? "✓" : "Copy"}
+                </button>
+              </div>
+              {isLocalhost && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">
+                  ⚠️ This URL won&apos;t work on your iPhone. Visit this page at{" "}
+                  <strong>http://&lt;your-mac-ip&gt;:3000</strong> to get a usable URL.
+                  Find your Mac&apos;s IP in{" "}
+                  <strong>System Settings → Wi-Fi → Details</strong>.
+                </p>
+              )}
+            </li>
+            <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;dictionary&quot; → tap <strong>Get Dictionary from Input</strong></li>
+            <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;dictionary&quot; → tap <strong>Get Dictionary Value</strong> → set Key to <strong>text</strong></li>
+            <li>Tap <strong>+</strong> → <strong>Add Action</strong> → search &quot;speak&quot; → tap <strong>Speak Text</strong></li>
+            <li>Rename to <strong>Should I run the {selectedName}?</strong></li>
+          </ol>
+        </details>
 
         {!isCloud && (
           <p className="text-xs text-blue-600">
