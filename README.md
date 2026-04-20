@@ -8,14 +8,14 @@ Carbon-aware appliance scheduling for your home. FlowShift recommends the best t
 
 - Real-time grid carbon intensity via BPA (Pacific Northwest)
 - EIA hourly fuel-type data for accurate 48-hour carbon forecasting
-- Utility TOU rate scheduling (Seattle City Light; extensible)
+- Utility TOU rate scheduling — NREL URDB full time-of-use structure (Tier 1) or EIA ZIP-code flat average (Tier 2) for broad US coverage
 - Solar generation integration — live via SolarEdge or estimated via pvlib clear-sky model
 - Multi-hour cycle scoring: optimizer averages cost and carbon across the full cycle span, not just the start hour
 - ENERGY STAR certified model lookup for dishwashers, washers, and dryers — auto-fills per-cycle kWh from the official dataset
 - Weighted cost/carbon optimizer with natural-language recommendations
-- Siri/HomePod voice query support via Apple Shortcuts
+- Siri/HomePod voice query support via Apple Shortcuts (QR-code import or manual setup)
 - 24-hour scheduling timeline with overlap warnings for multiple appliances
-- Account recovery: retrieve your API key by email
+- Account management via Google, GitHub, or Apple OAuth, or passwordless magic link email
 
 ## Architecture
 
@@ -32,6 +32,8 @@ FastAPI backend (Fly.io)
       │
       ├── BPA  ──────────── real-time carbon intensity
       ├── EIA  ──────────── 48h fuel-type carbon forecast
+      ├── NREL URDB ─────── utility TOU rate structures (Tier 1)
+      ├── NREL ZIP CSV ──── flat average rates, universal US coverage (Tier 2)
       ├── ENERGY STAR ───── certified appliance model data (bulk cache)
       ├── SolarEdge ─────── live solar generation (optional)
       ├── pvlib ─────────── clear-sky solar estimate (fallback)
@@ -68,6 +70,7 @@ Visit `http://localhost:3000` to onboard and get your API key.
 | Key | Required | Where to get it | Notes |
 |-----|----------|-----------------|-------|
 | `EIA_API_KEY` | Recommended | [api.eia.gov](https://api.eia.gov/) — free, instant | Without it, carbon forecasting falls back to BPA flat-repeat |
+| `NREL_API_KEY` | Recommended | [developer.nrel.gov](https://developer.nrel.gov/signup/) — free, instant | Required to ingest fresh URDB tariff data via `scripts/ingest_urdb.py` |
 | `DATABASE_URL` | Yes (prod) | Fly.io Postgres URL | SQLite used automatically in local dev |
 | `SOLAREDGE_API_KEY` | No | SolarEdge monitoring portal → Admin → API Access | Only needed if you have a SolarEdge inverter |
 | `SOLAREDGE_SITE_ID` | No | Same portal, or URL of your monitoring dashboard | Pair with `SOLAREDGE_API_KEY` |
@@ -189,17 +192,27 @@ All authenticated endpoints accept the API key as either:
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `POST` | `/onboard` | — | Create account; returns `api_key` |
-| `POST` | `/account/lookup` | — | Retrieve `api_key` by email |
 | `GET` | `/appliances/presets` | — | List default appliance presets |
 | `GET` | `/appliances/brands?category=` | — | Unique brands in ENERGY STAR dataset (dishwasher / washer / dryer) |
 | `GET` | `/appliances/models?category=&brand=` | — | All ENERGY STAR models for a brand |
 | `GET` | `/appliances/search?category=&q=` | — | Search ENERGY STAR models by query |
+| `GET` | `/utilities/search?zip=` | — | Find electric utilities for a US ZIP code |
+| `GET` | `/utilities/tariffs?eia_id=` | — | List active URDB TOU tariffs for a utility |
 | `GET` | `/appliances` | Yes | List user's appliances |
 | `POST` | `/appliances` | Yes | Add or update an appliance |
 | `DELETE` | `/appliances/{slug}` | Yes | Remove an appliance |
 | `GET` | `/status` | Yes | Current carbon intensity + utility rate |
 | `GET` | `/forecast` | Yes | 48-hour carbon + rate + solar forecast |
 | `GET` | `/recommend/{slug}` | Yes | Best run windows for an appliance |
+| `GET` | `/recommend/all` | Yes | Best shared window across all appliances |
+| `GET` | `/shortcuts/{slug}` | Yes | Download a pre-built Apple Shortcuts `.shortcut` file |
+| `GET` | `/data-sources` | Yes | Data provenance: utility tier, rate freshness, carbon source |
+| `PATCH` | `/account/preferences` | Yes | Update optimization weight (cost vs. carbon) |
+| `POST` | `/auth/magic-link/send` | — | Send a sign-in link to an email address |
+| `GET` | `/auth/magic-link/verify` | — | Verify token and issue session cookie |
+| `GET` | `/auth/{provider}/login` | — | Begin OAuth flow (google / github / apple) |
+| `GET` | `/auth/me` | Session | Get current user info |
+| `POST` | `/auth/logout` | Session | Clear session cookie |
 
 Interactive API docs are available at `/docs` (Swagger) and `/redoc` when the backend is running.
 
@@ -210,7 +223,7 @@ To keep the shared deployment usable for everyone:
 | Endpoint | Limit |
 |----------|-------|
 | `POST /onboard` | 5 per hour per IP |
-| `POST /account/lookup` | 10 per hour per IP |
+| `POST /auth/magic-link/send` | 5 per hour per IP |
 | `GET /appliances/brands` | 30 per hour per IP |
 | `GET /recommend/{slug}` | 60 per hour per API key |
 
@@ -222,10 +235,30 @@ Self-hosters can remove or adjust these limits in [`backend/limiter.py`](backend
 |--------|------|---------|
 | [BPA](https://www.bpa.gov/energy-and-services/power/wind-and-hydro-power-data) | Real-time grid carbon intensity (Pacific Northwest) | Public domain |
 | [EIA](https://www.eia.gov/opendata/) | Hourly fuel-type generation by balancing authority | Public domain |
+| [NREL URDB](https://openei.org/wiki/Utility_Rate_Database) | Utility time-of-use rate structures (Tier 1) | CC BY 4.0 |
+| [NREL ZIP-code Rates](https://developer.nrel.gov/docs/electricity/utility-rates-v3/) | Flat average $/kWh by ZIP code, universal US coverage (Tier 2) | Public domain |
 | [ENERGY STAR](https://www.energystar.gov/productfinder/product/certified-residential-dishwashers/) | Certified appliance energy data | Public domain (EPA) |
 | [Nominatim / OpenStreetMap](https://nominatim.org/) | Address geocoding | ODbL |
 | [pvlib](https://pvlib-python.readthedocs.io/) | Clear-sky solar irradiance model | BSD-3 |
 | [SolarEdge](https://developers.solaredge.com/) | Live inverter power output | Proprietary (user's own account) |
+
+## Known Limitations
+
+**Carbon data is Pacific Northwest–centric.** Real-time intensity uses BPA. Users elsewhere see EIA fuel-mix data as a proxy; expansion to other grid operators (WattTime, ElectricityMaps, EPA eGRID) is planned.
+
+**$ savings and run history require actual usage data.** FlowShift recommends based on grid signals but has no way to know whether you actually ran the appliance or what it consumed. Accurate savings tracking requires a live appliance feed — planned for a future release.
+
+**Smart appliance integrations are in validation.** We are actively spiking integrations with:
+- **LG ThinQ** (washer, dryer, dishwasher, refrigerator) — validation in progress using the official `thinqconnect` Python SDK
+- **Samsung SmartThings** — research spike planned
+- **Bosch Home Connect** — research spike planned
+- **Matter / Thread** — long-term; no implementation timeline
+
+Once validated, these integrations will enable proactive "run now" notifications and automatic cycle tracking. Contributions and reports from users with supported hardware are welcome.
+
+**Solar estimates are clear-sky only.** pvlib assumes no cloud cover. On overcast days estimates can be 3–5× too high, biasing recommendations toward "sunny" hours. Cloud-adjusted irradiance (Open-Meteo) is planned.
+
+**Optimization weight is per-account, not per-query.** You can update it from the dashboard but cannot override it per-request via the API today.
 
 ## Contributing
 
