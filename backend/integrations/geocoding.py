@@ -22,10 +22,13 @@ async def geocode(address: str) -> dict | None:
     params = {"q": address, "format": "json", "limit": 1}
     headers = {"User-Agent": USER_AGENT}
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(NOMINATIM_URL, params=params, headers=headers)
-        resp.raise_for_status()
-        results = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(NOMINATIM_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            results = resp.json()
+    except (httpx.TimeoutException, httpx.ConnectError):
+        return None
 
     if not results:
         return None
