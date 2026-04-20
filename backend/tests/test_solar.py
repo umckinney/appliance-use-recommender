@@ -1,4 +1,6 @@
-"""Tests for backend.engine.solar — solar power estimation."""
+"""Tests for backend.engine.solar and backend.integrations.solar."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -69,3 +71,85 @@ class TestEstimateNetMeteringCredit:
     def test_zero_credit_rate(self):
         credit = estimate_net_metering_credit(solar_kw=5.0, load_kw=1.0, credit_rate=0.0)
         assert credit == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# backend.integrations.solar — Open-Meteo primary + pvlib fallback
+# ---------------------------------------------------------------------------
+
+_MOCK_OPEN_METEO = {
+    "hourly": {
+        "time": [f"2024-01-01T{h:02d}:00" for h in range(48)],
+        "direct_radiation": [float(i * 10) for i in range(48)],
+        "diffuse_radiation": [float(i * 2) for i in range(48)],
+    }
+}
+
+
+class TestGetSolarForecast:
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        from backend.integrations import solar as solar_mod
+
+        solar_mod._cache.clear()
+        yield
+        solar_mod._cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_open_meteo_success_returns_48_hours(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = MagicMock(return_value=_MOCK_OPEN_METEO)
+
+        with patch("backend.integrations.solar.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            from backend.integrations.solar import get_solar_forecast
+
+            result = await get_solar_forecast(47.6, -122.3)
+
+        assert result["source"] == "open-meteo"
+        assert len(result["hourly"]) == 48
+        assert result["hourly"][1]["direct_radiation_w_m2"] == pytest.approx(10.0)
+        assert result["hourly"][1]["diffuse_radiation_w_m2"] == pytest.approx(2.0)
+
+    @pytest.mark.asyncio
+    async def test_open_meteo_failure_falls_back_to_pvlib(self):
+        with patch("backend.integrations.solar.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(side_effect=Exception("timeout"))
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            from backend.integrations.solar import get_solar_forecast
+
+            result = await get_solar_forecast(47.6, -122.3)
+
+        assert result["source"] == "pvlib-clearsky-fallback"
+        assert len(result["hourly"]) == 48
+
+    @pytest.mark.asyncio
+    async def test_result_is_cached(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = MagicMock(return_value=_MOCK_OPEN_METEO)
+
+        with patch("backend.integrations.solar.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            from backend.integrations.solar import get_solar_forecast
+
+            await get_solar_forecast(47.6, -122.3)
+            await get_solar_forecast(47.6, -122.3)
+
+        # Should only have been called once despite two invocations
+        assert mock_client.get.call_count == 1
