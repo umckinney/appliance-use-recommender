@@ -61,6 +61,22 @@ export type UtilitySearchResponse = {
   warning: string | null;
 };
 
+export type UrdbTariff = {
+  urdb_label: string;
+  name: string | null;
+  utility_id: string;  // "urdb_{label}"
+  effective_date: string | null;
+  is_active: boolean;
+  periods: Record<string, number>;  // {"off_peak": 0.07, "peak": 0.17}
+  net_metering_credit: number;
+};
+
+export type TariffListResponse = {
+  eia_id: number;
+  utility_name: string | null;
+  tariffs: UrdbTariff[];
+};
+
 export type DataSourceInfo = {
   source: string;
   tier: number | null;
@@ -215,6 +231,9 @@ export const api = {
 
   searchUtilities: (zip: string) =>
     request<UtilitySearchResponse>(`/utilities/search?zip=${encodeURIComponent(zip)}`),
+
+  listTariffs: (eiaId: number) =>
+    request<TariffListResponse>(`/utilities/tariffs?eia_id=${eiaId}`),
 
   getDataSources: (apiKey: string) =>
     request<DataSourcesResponse>(`/data-sources?api_key=${encodeURIComponent(apiKey)}`),

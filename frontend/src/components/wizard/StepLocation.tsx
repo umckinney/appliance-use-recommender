@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
-import { api, UtilitySearchResult } from "@/lib/api";
+import { api, UrdbTariff, UtilitySearchResult } from "@/lib/api";
 
 // Fallback for self-hosters who contributed YAML rate files
 const YAML_UTILITIES = [
@@ -20,6 +20,10 @@ function extractZip(address: string): string {
 // Detect likely non-US postal code (doesn't match 5-digit US pattern)
 function isLikelyNonUS(postal: string): boolean {
   return postal.length > 0 && !/^\d{5}$/.test(postal.replace(/\s/g, ""));
+}
+
+function fmtCents(rate: number): string {
+  return `${(rate * 100).toFixed(1)}¢/kWh`;
 }
 
 type LocationData = {
@@ -47,6 +51,12 @@ export default function StepLocation({ initial, onNext }: Props) {
   const [manualUtility, setManualUtility] = useState(
     initial.utility_id || YAML_UTILITIES[0].id
   );
+
+  // URDB tariff picker
+  const [tariffs, setTariffs] = useState<UrdbTariff[] | null>(null);
+  const [loadingTariffs, setLoadingTariffs] = useState(false);
+  const [selectedTariff, setSelectedTariff] = useState<UrdbTariff | null>(null);
+
   const [error, setError] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nonUS = isLikelyNonUS(postalCode);
@@ -66,6 +76,8 @@ export default function StepLocation({ initial, onNext }: Props) {
       setResults(null);
       setSelected(null);
       setWarning(null);
+      setTariffs(null);
+      setSelectedTariff(null);
       return;
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -75,8 +87,11 @@ export default function StepLocation({ initial, onNext }: Props) {
         const resp = await api.searchUtilities(zip);
         setResults(resp.utilities);
         setWarning(resp.warning ?? null);
-        if (resp.utilities.length === 1) setSelected(resp.utilities[0]);
-        else setSelected(null);
+        const auto = resp.utilities.length === 1 ? resp.utilities[0] : null;
+        setSelected(auto);
+        setTariffs(null);
+        setSelectedTariff(null);
+        if (auto) fetchTariffs(auto.eia_id);
       } catch {
         setResults([]);
         setWarning(null);
@@ -84,7 +99,30 @@ export default function StepLocation({ initial, onNext }: Props) {
         setSearching(false);
       }
     }, 400);
-  }, [postalCode]);
+  }, [postalCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchTariffs(eiaId: number) {
+    setLoadingTariffs(true);
+    setTariffs(null);
+    setSelectedTariff(null);
+    try {
+      const resp = await api.listTariffs(eiaId);
+      setTariffs(resp.tariffs);
+      // Auto-select if there's exactly one tariff
+      if (resp.tariffs.length === 1) setSelectedTariff(resp.tariffs[0]);
+    } catch {
+      setTariffs([]);
+    } finally {
+      setLoadingTariffs(false);
+    }
+  }
+
+  function handleSelectUtility(u: UtilitySearchResult) {
+    setSelected(u);
+    setTariffs(null);
+    setSelectedTariff(null);
+    fetchTariffs(u.eia_id);
+  }
 
   function handleNext() {
     if (!address.trim()) {
@@ -102,15 +140,29 @@ export default function StepLocation({ initial, onNext }: Props) {
     // ZIP lookup returned results
     if (results && results.length > 0) {
       const pick = selected ?? results.find((r) => r.is_primary) ?? results[0];
-      onNext({
-        address: address.trim(),
-        postal_code: postalCode.trim() || undefined,
-        utility_id: pick.utility_id,
-        utility_name: pick.utility_name,
-        utility_eia_id: pick.eia_id,
-        utility_rate_avg: pick.residential_rate_avg ?? undefined,
-        utility_tier: 2,
-      });
+
+      if (selectedTariff) {
+        // Tier 1 URDB — full TOU schedule available
+        onNext({
+          address: address.trim(),
+          postal_code: postalCode.trim() || undefined,
+          utility_id: selectedTariff.utility_id,
+          utility_name: pick.utility_name,
+          utility_eia_id: pick.eia_id,
+          utility_tier: 1,
+        });
+      } else {
+        // Tier 2 flat rate — no URDB tariff selected/available
+        onNext({
+          address: address.trim(),
+          postal_code: postalCode.trim() || undefined,
+          utility_id: pick.utility_id,
+          utility_name: pick.utility_name,
+          utility_eia_id: pick.eia_id,
+          utility_rate_avg: pick.residential_rate_avg ?? undefined,
+          utility_tier: 2,
+        });
+      }
       return;
     }
 
@@ -192,13 +244,15 @@ export default function StepLocation({ initial, onNext }: Props) {
         {/* Utility picker — populated from ZIP lookup */}
         {!nonUS && results && results.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-gray-500 mb-1.5">Select your utility</p>
+            <p className="text-xs font-medium text-gray-500 mb-1.5">
+              {results.length === 1 ? "Your utility" : "Select your utility"}
+            </p>
             <div className="space-y-1.5">
               {results.map((u) => (
                 <button
                   key={u.eia_id}
                   type="button"
-                  onClick={() => setSelected(u)}
+                  onClick={() => handleSelectUtility(u)}
                   className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm transition-colors ${
                     selected?.eia_id === u.eia_id
                       ? "border-blue-500 bg-blue-50"
@@ -209,7 +263,7 @@ export default function StepLocation({ initial, onNext }: Props) {
                   {u.state && <span className="text-gray-400 ml-1.5">{u.state}</span>}
                   {u.residential_rate_avg && (
                     <span className="float-right text-gray-400 text-xs">
-                      ~{(u.residential_rate_avg * 100).toFixed(1)}¢/kWh
+                      ~{(u.residential_rate_avg * 100).toFixed(1)}¢/kWh avg
                     </span>
                   )}
                   {u.is_primary && results.length > 1 && (
@@ -218,6 +272,63 @@ export default function StepLocation({ initial, onNext }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* URDB tariff picker — shown after a utility is selected */}
+        {selected && !loadingTariffs && tariffs && tariffs.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-gray-500 mb-1.5">
+              Rate plan{" "}
+              <span className="font-normal text-gray-400">
+                — {tariffs.length === 1 ? "1 plan found" : `${tariffs.length} plans found`}
+              </span>
+            </p>
+            <div className="space-y-1.5">
+              {tariffs.map((t) => {
+                const rates = Object.entries(t.periods).sort(([, a], [, b]) => a - b);
+                return (
+                  <button
+                    key={t.urdb_label}
+                    type="button"
+                    onClick={() => setSelectedTariff(t)}
+                    className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm transition-colors ${
+                      selectedTariff?.urdb_label === t.urdb_label
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300 bg-white"
+                    }`}
+                  >
+                    <div className="font-medium text-gray-900 truncate">
+                      {t.name ?? t.urdb_label}
+                    </div>
+                    <div className="flex gap-2 mt-0.5 flex-wrap">
+                      {rates.map(([period, rate]) => (
+                        <span key={period} className="text-xs text-gray-500">
+                          {period.replace("_", "-")}: {fmtCents(rate)}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              Selecting a rate plan enables accurate time-of-use pricing (Tier 1). Skip to
+              use the flat average rate instead.
+            </p>
+          </div>
+        )}
+
+        {/* Tariff loading indicator */}
+        {selected && loadingTariffs && (
+          <p className="text-xs text-gray-400">Loading rate plans…</p>
+        )}
+
+        {/* Tier 2 notice when no URDB tariffs exist for selected utility */}
+        {selected && !loadingTariffs && tariffs?.length === 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2 text-xs text-yellow-800">
+            No detailed rate plan found — flat average rate will be used. Cost estimates
+            will be less precise but still directionally correct.
           </div>
         )}
 

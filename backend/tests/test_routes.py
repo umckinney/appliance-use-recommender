@@ -839,10 +839,14 @@ class TestAuth:
         await self._onboard(client, "once@example.com")
         await self._insert_token(db_factory, "once@example.com", "single-use-token-xyz")
 
-        r1 = await client.get("/auth/magic-link/verify?token=single-use-token-xyz", follow_redirects=False)
+        r1 = await client.get(
+            "/auth/magic-link/verify?token=single-use-token-xyz", follow_redirects=False
+        )
         assert r1.status_code in (302, 307)
 
-        r2 = await client.get("/auth/magic-link/verify?token=single-use-token-xyz", follow_redirects=False)
+        r2 = await client.get(
+            "/auth/magic-link/verify?token=single-use-token-xyz", follow_redirects=False
+        )
         assert r2.status_code == 400
 
     @pytest.mark.asyncio
@@ -856,7 +860,9 @@ class TestAuth:
         await self._onboard(client, "me@example.com")
         await self._insert_token(db_factory, "me@example.com", "me-test-token")
 
-        verify = await client.get("/auth/magic-link/verify?token=me-test-token", follow_redirects=False)
+        verify = await client.get(
+            "/auth/magic-link/verify?token=me-test-token", follow_redirects=False
+        )
         assert verify.status_code in (302, 307)
 
         me = await client.get("/auth/me")
@@ -889,3 +895,321 @@ class TestAuth:
             follow_redirects=False,
         )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# /utilities — ZIP search + URDB tariff listing
+# ---------------------------------------------------------------------------
+
+
+class TestUtilities:
+    async def _seed_utility(self, db_factory, eia_id: int = 99001) -> None:
+        """Insert a UtilityRecord + ZipcodeUtility row for testing."""
+        from backend.models import UtilityRecord, ZipcodeUtility
+
+        async with db_factory() as db:
+            db.add(UtilityRecord(eia_id=eia_id, name="Test Power Co", state="WA"))
+            await db.flush()
+            db.add(
+                ZipcodeUtility(
+                    zipcode="00001",
+                    eia_id=eia_id,
+                    is_primary=True,
+                    residential_rate_avg=0.12,
+                    source_year=2023,
+                )
+            )
+            await db.commit()
+
+    async def _seed_urdb_rate(self, db_factory, eia_id: int = 99001) -> str:
+        """Insert a UrdbRate row and return its urdb_label."""
+        from backend.models import UrdbRate
+
+        raw = {
+            "energyratestructure": [
+                [{"rate": 0.08, "adj": 0.0}],
+                [{"rate": 0.24, "adj": 0.0}],
+            ],
+            "energyweekdayschedule": [[0] * 16 + [1] * 8] * 12,
+            "energyweekendschedule": [[0] * 24] * 12,
+        }
+        async with db_factory() as db:
+            db.add(
+                UrdbRate(
+                    urdb_label="test-label-001",
+                    eia_id=eia_id,
+                    name="Test TOU Residential",
+                    sector="Residential",
+                    is_active=True,
+                    raw_json=raw,
+                )
+            )
+            await db.commit()
+        return "test-label-001"
+
+    @pytest.mark.asyncio
+    async def test_zip_search_returns_utility(self, client, db_factory):
+        await self._seed_utility(db_factory)
+        resp = await client.get("/utilities/search?zip=00001")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["zipcode"] == "00001"
+        assert len(body["utilities"]) == 1
+        u = body["utilities"][0]
+        assert u["eia_id"] == 99001
+        assert u["utility_name"] == "Test Power Co"
+        assert u["utility_id"] == "eia_99001"
+        assert u["residential_rate_avg"] == pytest.approx(0.12)
+
+    @pytest.mark.asyncio
+    async def test_zip_search_empty_returns_empty_list(self, client):
+        resp = await client.get("/utilities/search?zip=00000")
+        assert resp.status_code == 200
+        assert resp.json()["utilities"] == []
+
+    @pytest.mark.asyncio
+    async def test_tariffs_empty_when_no_urdb_data(self, client, db_factory):
+        await self._seed_utility(db_factory, eia_id=99002)
+        resp = await client.get("/utilities/tariffs?eia_id=99002")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tariffs"] == []
+        assert body["utility_name"] == "Test Power Co"
+
+    @pytest.mark.asyncio
+    async def test_tariffs_returns_parsed_periods(self, client, db_factory):
+        await self._seed_utility(db_factory, eia_id=99003)
+        await self._seed_urdb_rate(db_factory, eia_id=99003)
+
+        resp = await client.get("/utilities/tariffs?eia_id=99003")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["tariffs"]) == 1
+        t = body["tariffs"][0]
+        assert t["urdb_label"] == "test-label-001"
+        assert t["name"] == "Test TOU Residential"
+        assert t["utility_id"] == "urdb_test-label-001"
+        assert "off_peak" in t["periods"]
+        assert "peak" in t["periods"]
+        assert t["periods"]["off_peak"] == pytest.approx(0.08)
+        assert t["periods"]["peak"] == pytest.approx(0.24)
+
+    @pytest.mark.asyncio
+    async def test_tariffs_inactive_excluded(self, client, db_factory):
+        """Inactive URDB tariffs must not appear in the response."""
+        from backend.models import UrdbRate
+
+        await self._seed_utility(db_factory, eia_id=99004)
+        async with db_factory() as db:
+            db.add(
+                UrdbRate(
+                    urdb_label="inactive-001",
+                    eia_id=99004,
+                    name="Old Plan",
+                    sector="Residential",
+                    is_active=False,
+                    raw_json={},
+                )
+            )
+            await db.commit()
+
+        resp = await client.get("/utilities/tariffs?eia_id=99004")
+        assert resp.status_code == 200
+        assert resp.json()["tariffs"] == []
+
+
+# ---------------------------------------------------------------------------
+# URDB rate engine unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestUrdbRateEngine:
+    def test_get_rate_from_raw_off_peak(self):
+        from datetime import datetime
+
+        from backend.integrations.urdb import get_rate_from_raw
+
+        raw = {
+            "energyratestructure": [
+                [{"rate": 0.08}],
+                [{"rate": 0.24}],
+            ],
+            "energyweekdayschedule": [[0] * 24] * 12,
+        }
+        rate, period = get_rate_from_raw(raw, datetime(2024, 6, 15, 10))
+        assert rate == pytest.approx(0.08)
+        assert period == "off_peak"
+
+    def test_get_rate_from_raw_peak(self):
+        from datetime import datetime
+
+        from backend.integrations.urdb import get_rate_from_raw
+
+        raw = {
+            "energyratestructure": [
+                [{"rate": 0.08}],
+                [{"rate": 0.24}],
+            ],
+            "energyweekdayschedule": [[1] * 24] * 12,
+        }
+        rate, period = get_rate_from_raw(raw, datetime(2024, 6, 15, 10))
+        assert rate == pytest.approx(0.24)
+        assert period == "peak"
+
+    def test_get_rate_from_raw_empty_returns_fallback(self):
+        from datetime import datetime
+
+        from backend.integrations.urdb import get_rate_from_raw
+
+        rate, period = get_rate_from_raw({}, datetime(2024, 6, 15, 10))
+        assert rate > 0
+        assert period == "off_peak"
+
+    def test_summarise_periods_three_period_naming(self):
+        from backend.integrations.urdb import summarise_periods
+
+        raw = {
+            "energyratestructure": [
+                [{"rate": 0.07}],
+                [{"rate": 0.15}],
+                [{"rate": 0.30}],
+            ],
+        }
+        periods = summarise_periods(raw)
+        assert "off_peak" in periods
+        assert "mid_peak" in periods
+        assert "peak" in periods
+        assert periods["off_peak"] == pytest.approx(0.07)
+        assert periods["peak"] == pytest.approx(0.30)
+
+    def test_get_net_metering_credit(self):
+        from backend.integrations.urdb import get_net_metering_credit
+
+        raw = {
+            "energyratestructure": [
+                [{"rate": 0.08, "sell": 0.05}],
+                [{"rate": 0.24, "sell": 0.10}],
+            ]
+        }
+        assert get_net_metering_credit(raw) == pytest.approx(0.10)
+
+    def test_get_net_metering_credit_no_sell_returns_zero(self):
+        from backend.integrations.urdb import get_net_metering_credit
+
+        raw = {"energyratestructure": [[{"rate": 0.12}]]}
+        assert get_net_metering_credit(raw) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Recommend with URDB utility_id
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendUrdb:
+    @pytest.fixture
+    async def urdb_api_key(self, client, db_factory):
+        """Onboard a user with a urdb_ utility_id backed by a real UrdbRate row."""
+        from backend.models import UrdbRate, UtilityRecord
+
+        raw = {
+            "energyratestructure": [
+                [{"rate": 0.08}],
+                [{"rate": 0.22}],
+            ],
+            "energyweekdayschedule": [[0] * 24] * 12,
+            "energyweekendschedule": [[0] * 24] * 12,
+        }
+        async with db_factory() as db:
+            db.add(UtilityRecord(eia_id=88001, name="URDB Test Utility", state="CA"))
+            await db.flush()
+            db.add(
+                UrdbRate(
+                    urdb_label="urdb-test-88001",
+                    eia_id=88001,
+                    name="TOU-D Residential",
+                    sector="Residential",
+                    is_active=True,
+                    raw_json=raw,
+                )
+            )
+            await db.commit()
+
+        with patch(
+            "backend.routers.onboard.geocode_with_fallback",
+            new_callable=AsyncMock,
+            return_value=MOCK_GEO,
+        ):
+            resp = await client.post(
+                "/onboard",
+                json={
+                    "address": "100 Test Blvd, Los Angeles, CA",
+                    "utility_id": "urdb_urdb-test-88001",
+                    "utility_tier": 1,
+                    "appliances": [
+                        {
+                            "name": "Dishwasher",
+                            "slug": "dishwasher",
+                            "cycle_kwh": 1.5,
+                            "cycle_minutes": 90,
+                        }
+                    ],
+                },
+            )
+        assert resp.status_code == 200
+        return resp.json()["api_key"]
+
+    @pytest.mark.asyncio
+    async def test_recommend_with_urdb_utility(self, client, urdb_api_key):
+        """Recommend endpoint should work end-to-end for a urdb_ utility user."""
+        with (
+            patch(
+                "backend.routers.recommend.bpa.get_carbon_intensity",
+                new_callable=AsyncMock,
+                return_value=MOCK_GRID,
+            ),
+            patch(
+                "backend.routers.recommend.solar_integration.get_solar_forecast",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER,
+            ),
+            patch(
+                "backend.routers.recommend.solaredge.get_current_power",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get(f"/recommend/dishwasher?api_key={urdb_api_key}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["appliance"] == "Dishwasher"
+        assert body["current_window"]["rate_usd_kwh"] == pytest.approx(0.08)
+
+    @pytest.mark.asyncio
+    async def test_forecast_with_urdb_utility(self, client, urdb_api_key):
+        """Forecast endpoint should return rates sourced from URDB."""
+        with (
+            patch(
+                "backend.routers.forecast.bpa.get_carbon_intensity",
+                new_callable=AsyncMock,
+                return_value=MOCK_GRID,
+            ),
+            patch(
+                "backend.routers.forecast.solar_integration.get_solar_forecast",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER,
+            ),
+            patch(
+                "backend.routers.forecast.solaredge.get_current_power",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get(f"/forecast?api_key={urdb_api_key}")
+
+        assert resp.status_code == 200
+        hours = resp.json()["hours"]
+        assert len(hours) == 24
+        # All hours off-peak for this fixture (schedule all zeros)
+        for h in hours:
+            assert h["rate_usd_kwh"] == pytest.approx(0.08)
