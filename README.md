@@ -147,7 +147,7 @@ fly secrets set SOLAREDGE_SITE_ID=your_site_id SOLAREDGE_API_KEY=your_api_key
 fly secrets set \
   GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
   GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... \
-  RESEND_API_KEY=...
+  BREVO_API_KEY=...
 
 # 4. Deploy
 fly deploy

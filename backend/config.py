@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     apple_key_id: str = ""
     apple_private_key: str = ""  # PEM contents of AuthKey_XXXXXXXX.p8
 
-    # Magic link email — Resend API key (free tier: 100 emails/day)
-    resend_api_key: str = ""
+    # Magic link email — Brevo API key (free tier: 300 emails/day)
+    brevo_api_key: str = ""
     magic_link_from_email: str = "noreply@flowshift.app"
 
     # CORS — comma-separated list of allowed origins for browser requests.

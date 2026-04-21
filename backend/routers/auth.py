@@ -23,7 +23,7 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
-import resend
+import httpx
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -319,7 +319,7 @@ async def send_magic_link(
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if user and settings.resend_api_key:
+    if user and settings.brevo_api_key:
         token = secrets.token_urlsafe(32)
         token_hash = _hash_token(token)
         db.add(
@@ -332,20 +332,26 @@ async def send_magic_link(
         await db.commit()
 
         verify_url = f"{settings.frontend_url}/auth/verify?token={token}"
-        resend.api_key = settings.resend_api_key
-        resend.Emails.send(
-            {
-                "from": settings.magic_link_from_email,
-                "to": body.email,
-                "subject": "Sign in to FlowShift",
-                "html": (
-                    f"<p>Click the link below to sign in to FlowShift. "
-                    f"It expires in 15 minutes.</p>"
-                    f'<p><a href="{verify_url}">Sign in →</a></p>'
-                    f"<p>If you didn't request this, you can ignore this email.</p>"
-                ),
-            }
-        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": settings.brevo_api_key,
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                },
+                json={
+                    "sender": {"name": "FlowShift", "email": settings.magic_link_from_email},
+                    "to": [{"email": body.email}],
+                    "subject": "Sign in to FlowShift",
+                    "htmlContent": (
+                        f"<p>Click the link below to sign in to FlowShift. "
+                        f"It expires in 15 minutes.</p>"
+                        f'<p><a href="{verify_url}">Sign in →</a></p>'
+                        f"<p>If you didn't request this, you can ignore this email.</p>"
+                    ),
+                },
+            )
 
     return {"message": "If an account with that email exists, a sign-in link has been sent."}
 
