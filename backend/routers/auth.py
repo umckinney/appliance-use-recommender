@@ -72,6 +72,15 @@ _SESSION_MAX_AGE = timedelta(days=settings.session_max_age_days)
 _MAGIC_LINK_TTL = timedelta(minutes=15)
 
 
+def _cookie_kwargs() -> dict:
+    prod = settings.env == "production"
+    return {
+        "httponly": True,
+        "samesite": "none" if prod else "lax",
+        "secure": prod,
+    }
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
@@ -204,7 +213,7 @@ async def oauth_login(provider: str, request: Request) -> RedirectResponse:
 
     url = f"{cfg['authorize_url']}?{urlencode(params)}"
     response = RedirectResponse(url)
-    response.set_cookie("oauth_state", state, max_age=600, httponly=True, samesite="lax")
+    response.set_cookie("oauth_state", state, max_age=600, **_cookie_kwargs())
     return response
 
 
@@ -286,9 +295,7 @@ async def oauth_callback(
         SESSION_COOKIE,
         session_id,
         max_age=int(_SESSION_MAX_AGE.total_seconds()),
-        httponly=True,
-        samesite="lax",
-        secure=settings.env == "production",
+        **_cookie_kwargs(),
     )
     response.delete_cookie("oauth_state")
     return response
@@ -375,9 +382,7 @@ async def verify_magic_link(
         SESSION_COOKIE,
         session_id,
         max_age=int(_SESSION_MAX_AGE.total_seconds()),
-        httponly=True,
-        samesite="lax",
-        secure=settings.env == "production",
+        **_cookie_kwargs(),
     )
     return response
 
@@ -413,5 +418,10 @@ async def logout(
         if session:
             await db.delete(session)
             await db.commit()
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(
+        SESSION_COOKIE,
+        httponly=True,
+        samesite="none" if settings.env == "production" else "lax",
+        secure=settings.env == "production",
+    )
     return {"message": "Logged out."}
