@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     # CORS — comma-separated list of allowed origins for browser requests.
     # Must be explicit (no wildcard) when allow_credentials=True.
     # Self-hosters: set to the URL of your frontend, e.g. https://flowshift.example.com
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "https://appliance-use-recommender.vercel.app",
+    ]
 
     # Session config
     session_max_age_days: int = 30
