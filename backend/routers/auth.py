@@ -20,6 +20,7 @@ remains a separate bearer token for the Siri / API integration.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -28,13 +29,16 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import func as sql_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.database import get_db
 from backend.limiter import limiter
-from backend.models import MagicLinkToken, OAuthAccount, User, UserSession
+from backend.models import EmailSendLog, MagicLinkToken, OAuthAccount, User, UserSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -79,6 +83,30 @@ def _cookie_kwargs() -> dict:
         "samesite": "none" if prod else "lax",
         "secure": prod,
     }
+
+
+async def _email_send_counts(db: AsyncSession) -> tuple[int, int]:
+    """Return (daily, monthly) counts of successful sends in the trailing 24h / 30d."""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    day_ago = now - timedelta(days=1)
+    month_ago = now - timedelta(days=30)
+    daily = (
+        await db.execute(
+            select(sql_func.count(EmailSendLog.id)).where(
+                EmailSendLog.sent_at >= day_ago,
+                EmailSendLog.status == "sent",
+            )
+        )
+    ).scalar_one()
+    monthly = (
+        await db.execute(
+            select(sql_func.count(EmailSendLog.id)).where(
+                EmailSendLog.sent_at >= month_ago,
+                EmailSendLog.status == "sent",
+            )
+        )
+    ).scalar_one()
+    return daily, monthly
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -315,7 +343,43 @@ async def send_magic_link(
     body: MagicLinkRequest,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    # Always return the same message to prevent email enumeration
+    # Email budget check — applied uniformly so a cap-hit response doesn't leak
+    # whether an email is registered.
+    if settings.brevo_api_key:
+        daily, monthly = await _email_send_counts(db)
+        if daily >= settings.email_daily_cap or monthly >= settings.email_monthly_cap:
+            db.add(
+                EmailSendLog(
+                    recipient_email=body.email,
+                    status="rate_limited",
+                    provider="brevo",
+                )
+            )
+            await db.commit()
+            logger.warning(
+                "Email budget cap reached: daily=%d/%d monthly=%d/%d",
+                daily,
+                settings.email_daily_cap,
+                monthly,
+                settings.email_monthly_cap,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Email service is temporarily at capacity. "
+                    "Please try OAuth login or try again in a few hours."
+                ),
+            )
+        if daily >= settings.email_daily_cap * 0.8 or monthly >= settings.email_monthly_cap * 0.8:
+            logger.warning(
+                "Email budget approaching cap: daily=%d/%d monthly=%d/%d",
+                daily,
+                settings.email_daily_cap,
+                monthly,
+                settings.email_monthly_cap,
+            )
+
+    # Always return the same message to prevent email enumeration.
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
@@ -332,26 +396,43 @@ async def send_magic_link(
         await db.commit()
 
         verify_url = f"{settings.frontend_url}/auth/verify?token={token}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(
-                "https://api.brevo.com/v3/smtp/email",
-                headers={
-                    "api-key": settings.brevo_api_key,
-                    "accept": "application/json",
-                    "content-type": "application/json",
-                },
-                json={
-                    "sender": {"name": "FlowShift", "email": settings.magic_link_from_email},
-                    "to": [{"email": body.email}],
-                    "subject": "Sign in to FlowShift",
-                    "htmlContent": (
-                        f"<p>Click the link below to sign in to FlowShift. "
-                        f"It expires in 15 minutes.</p>"
-                        f'<p><a href="{verify_url}">Sign in →</a></p>'
-                        f"<p>If you didn't request this, you can ignore this email.</p>"
-                    ),
-                },
+        send_status = "sent"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://api.brevo.com/v3/smtp/email",
+                    headers={
+                        "api-key": settings.brevo_api_key,
+                        "accept": "application/json",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "sender": {"name": "FlowShift", "email": settings.magic_link_from_email},
+                        "to": [{"email": body.email}],
+                        "subject": "Sign in to FlowShift",
+                        "htmlContent": (
+                            f"<p>Click the link below to sign in to FlowShift. "
+                            f"It expires in 15 minutes.</p>"
+                            f'<p><a href="{verify_url}">Sign in →</a></p>'
+                            f"<p>If you didn't request this, you can ignore this email.</p>"
+                        ),
+                    },
+                )
+                if resp.status_code >= 400:
+                    send_status = "failed"
+                    logger.error("Brevo send returned %d: %s", resp.status_code, resp.text[:500])
+        except httpx.HTTPError as exc:
+            send_status = "failed"
+            logger.exception("Brevo send failed: %s", exc)
+
+        db.add(
+            EmailSendLog(
+                recipient_email=body.email,
+                status=send_status,
+                provider="brevo",
             )
+        )
+        await db.commit()
 
     return {"message": "If an account with that email exists, a sign-in link has been sent."}
 

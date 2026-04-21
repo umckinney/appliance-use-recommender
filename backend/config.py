@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Magic link email — Brevo API key (free tier: 300 emails/day)
     brevo_api_key: str = ""
     magic_link_from_email: str = "noreply@flowshift.app"
+    email_daily_cap: int = 300
+    email_monthly_cap: int = 9000
 
     # CORS — comma-separated list of allowed origins for browser requests.
     # Must be explicit (no wildcard) when allow_credentials=True.

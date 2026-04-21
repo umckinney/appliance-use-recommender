@@ -183,6 +183,18 @@ class UrdbRate(Base):
     ingested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class EmailSendLog(Base):
+    """One row per outbound transactional email attempt — drives daily/monthly budget checks."""
+
+    __tablename__ = "email_send_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    recipient_email: Mapped[str] = mapped_column(String(256))
+    status: Mapped[str] = mapped_column(String(32))  # "sent" | "rate_limited" | "failed"
+    provider: Mapped[str] = mapped_column(String(32))  # "brevo" | "ses" | ...
+
+
 class RateIngestionRun(Base):
     """Audit log for rate data ingestion runs."""
 

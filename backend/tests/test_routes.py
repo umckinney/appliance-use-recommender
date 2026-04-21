@@ -883,6 +883,138 @@ class TestAuth:
         await client.post("/auth/logout")
         assert (await client.get("/auth/me")).status_code == 401
 
+    async def _seed_email_logs(
+        self,
+        db_factory,
+        count: int,
+        *,
+        age_hours: float = 0.0,
+        status: str = "sent",
+    ) -> None:
+        """Insert `count` EmailSendLog rows with sent_at set to `age_hours` in the past."""
+        from datetime import UTC, datetime, timedelta
+
+        from backend.models import EmailSendLog
+
+        sent_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=age_hours)
+        async with db_factory() as db:
+            for _ in range(count):
+                db.add(
+                    EmailSendLog(
+                        sent_at=sent_at,
+                        recipient_email="prev@example.com",
+                        status=status,
+                        provider="brevo",
+                    )
+                )
+            await db.commit()
+
+    @pytest.mark.asyncio
+    async def test_magic_link_send_logs_success(self, client, db_factory):
+        """When below cap + user exists + brevo key set, a 'sent' log row is inserted."""
+        from sqlalchemy import select
+
+        from backend.config import settings
+        from backend.models import EmailSendLog
+
+        await self._onboard(client, "logme@example.com")
+
+        mock_post = AsyncMock(return_value=AsyncMock(status_code=201))
+        with (
+            patch.object(settings, "brevo_api_key", "test-key"),
+            patch("backend.routers.auth.httpx.AsyncClient") as mock_client,
+        ):
+            mock_client.return_value.__aenter__.return_value.post = mock_post
+            resp = await client.post("/auth/magic-link/send", json={"email": "logme@example.com"})
+
+        assert resp.status_code == 200
+        mock_post.assert_awaited_once()
+
+        async with db_factory() as db:
+            rows = (await db.execute(select(EmailSendLog))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].status == "sent"
+        assert rows[0].provider == "brevo"
+        assert rows[0].recipient_email == "logme@example.com"
+
+    @pytest.mark.asyncio
+    async def test_magic_link_send_at_daily_cap_returns_503(self, client, db_factory):
+        """Daily cap hit → 503 with enumeration-safe message; no send attempted."""
+        from backend.config import settings
+
+        await self._onboard(client, "capped@example.com")
+        await self._seed_email_logs(db_factory, count=settings.email_daily_cap, age_hours=1)
+
+        mock_post = AsyncMock()
+        with (
+            patch.object(settings, "brevo_api_key", "test-key"),
+            patch("backend.routers.auth.httpx.AsyncClient") as mock_client,
+        ):
+            mock_client.return_value.__aenter__.return_value.post = mock_post
+            resp = await client.post("/auth/magic-link/send", json={"email": "capped@example.com"})
+
+        assert resp.status_code == 503
+        mock_post.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_magic_link_send_at_daily_cap_503_for_unknown_email(self, client, db_factory):
+        """Cap response must also fire for nonexistent emails — no enumeration leak."""
+        from backend.config import settings
+
+        await self._seed_email_logs(db_factory, count=settings.email_daily_cap, age_hours=1)
+
+        with patch.object(settings, "brevo_api_key", "test-key"):
+            resp = await client.post("/auth/magic-link/send", json={"email": "ghost@example.com"})
+
+        assert resp.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_magic_link_send_at_monthly_cap_returns_503(self, client, db_factory):
+        """Monthly cap hit (daily below cap) still returns 503."""
+        from backend.config import settings
+
+        await self._onboard(client, "monthly@example.com")
+        # Spread sends across the past 30d so daily count stays below cap.
+        await self._seed_email_logs(db_factory, count=settings.email_monthly_cap, age_hours=24 * 20)
+
+        mock_post = AsyncMock()
+        with (
+            patch.object(settings, "brevo_api_key", "test-key"),
+            patch("backend.routers.auth.httpx.AsyncClient") as mock_client,
+        ):
+            mock_client.return_value.__aenter__.return_value.post = mock_post
+            resp = await client.post("/auth/magic-link/send", json={"email": "monthly@example.com"})
+
+        assert resp.status_code == 503
+        mock_post.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_magic_link_send_warns_at_80_percent(self, client, db_factory, caplog):
+        """At ≥80% of daily cap, send still succeeds but a warning is logged."""
+        import logging
+
+        from backend.config import settings
+
+        await self._onboard(client, "warn@example.com")
+        await self._seed_email_logs(
+            db_factory, count=int(settings.email_daily_cap * 0.8), age_hours=1
+        )
+
+        mock_post = AsyncMock(return_value=AsyncMock(status_code=201))
+        with (
+            patch.object(settings, "brevo_api_key", "test-key"),
+            patch("backend.routers.auth.httpx.AsyncClient") as mock_client,
+            caplog.at_level(logging.WARNING, logger="backend.routers.auth"),
+        ):
+            mock_client.return_value.__aenter__.return_value.post = mock_post
+            resp = await client.post("/auth/magic-link/send", json={"email": "warn@example.com"})
+
+        assert resp.status_code == 200
+        mock_post.assert_awaited_once()
+        assert any(
+            "email budget" in rec.message.lower() for rec in caplog.records
+        ), f"expected warning; got: {[r.message for r in caplog.records]}"
+
     @pytest.mark.asyncio
     async def test_oauth_login_unknown_provider(self, client):
         resp = await client.get("/auth/unknown-provider/login")
